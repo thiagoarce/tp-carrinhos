@@ -100,6 +100,7 @@ var _NS = {
   HORARIOS:      'h',
   EQUIPAMENTOS:  'e',
   EQ_LOCAIS:     'el',
+  PUBLICADORES:  'pb',
   AGENDAMENTOS:  'a',
   FERIADOS:      'f',
   PUBLICO:       'pub'

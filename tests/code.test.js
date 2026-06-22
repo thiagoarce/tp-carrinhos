@@ -299,6 +299,8 @@ test('adminAgendar cria sem PIN e mantém race-check de capacidade', () => {
   const ctx = nova();
   const p = ctx.criarPonto({ nome: 'P', lat: 0, lng: 0 });
   const h = ctx.criarHorario({ pontoId: p.id, diaSemana: 6, horaInicio: '08:00', horaFim: '10:00', capacidade: 1 });
+  ctx.criarPublicador({ nome: 'João' });
+  ctx.criarPublicador({ nome: 'Maria' });
   ctx.adminAgendar({ horarioId: h.id, data: '2026-06-20', publicador: 'João' });
   let erro = false;
   try { ctx.adminAgendar({ horarioId: h.id, data: '2026-06-20', publicador: 'Maria' }); }
@@ -306,10 +308,21 @@ test('adminAgendar cria sem PIN e mantém race-check de capacidade', () => {
   assertTrue(erro, 'segundo agendamento deveria estourar capacidade');
 });
 
+test('adminAgendar exige publicador cadastrado', () => {
+  const ctx = nova();
+  const p = ctx.criarPonto({ nome: 'P', lat: 0, lng: 0 });
+  const h = ctx.criarHorario({ pontoId: p.id, diaSemana: 6, horaInicio: '08:00', horaFim: '10:00', capacidade: 2 });
+  let erro = false;
+  try { ctx.adminAgendar({ horarioId: h.id, data: '2026-06-20', publicador: 'João' }); }
+  catch (e) { erro = true; }
+  assertTrue(erro, 'sem cadastro deveria barrar');
+});
+
 test('adminAgendar bloqueia mesmo nome duplicado no slot', () => {
   const ctx = nova();
   const p = ctx.criarPonto({ nome: 'P', lat: 0, lng: 0 });
   const h = ctx.criarHorario({ pontoId: p.id, diaSemana: 6, horaInicio: '08:00', horaFim: '10:00', capacidade: 5 });
+  ctx.criarPublicador({ nome: 'João' });
   ctx.adminAgendar({ horarioId: h.id, data: '2026-06-20', publicador: 'João' });
   let erro = false;
   try { ctx.adminAgendar({ horarioId: h.id, data: '2026-06-20', publicador: 'joão' }); }
@@ -322,6 +335,8 @@ test('adminMoverAgendamento muda slot e respeita capacidade do destino', () => {
   const p = ctx.criarPonto({ nome: 'P', lat: 0, lng: 0 });
   const hA = ctx.criarHorario({ pontoId: p.id, diaSemana: 6, horaInicio: '08:00', horaFim: '10:00', capacidade: 2 });
   const hB = ctx.criarHorario({ pontoId: p.id, diaSemana: 6, horaInicio: '14:00', horaFim: '16:00', capacidade: 1 });
+  ctx.criarPublicador({ nome: 'João' });
+  ctx.criarPublicador({ nome: 'Maria' });
   const a = ctx.adminAgendar({ horarioId: hA.id, data: '2026-06-20', publicador: 'João' });
   ctx.adminAgendar({ horarioId: hB.id, data: '2026-06-20', publicador: 'Maria' });
   let erro = false;
@@ -329,8 +344,6 @@ test('adminMoverAgendamento muda slot e respeita capacidade do destino', () => {
     ctx.adminMoverAgendamento({ id: a.id, novoHorarioId: hB.id, novaData: '2026-06-20' });
   } catch (e) { erro = true; }
   assertTrue(erro, 'destino lotado, deveria falhar');
-
-  // mas mover pra outra data do mesmo horário (sábado) deve passar
   ctx.adminMoverAgendamento({ id: a.id, novoHorarioId: hA.id, novaData: '2026-06-27' });
   const ags = ctx.listarAgendamentos({});
   const joao = ags.find(x => x.id === a.id);
@@ -343,16 +356,78 @@ test('adminTrocarEquipamento troca/limpa e bloqueia conflito', () => {
   const h = ctx.criarHorario({ pontoId: p.id, diaSemana: 6, horaInicio: '08:00', horaFim: '10:00', capacidade: 2 });
   const e1 = ctx.criarEquipamento({ nome: 'C1', tipo: 'carrinho' });
   const e2 = ctx.criarEquipamento({ nome: 'C2', tipo: 'carrinho' });
+  ctx.criarPublicador({ nome: 'A' });
+  ctx.criarPublicador({ nome: 'B' });
   const a1 = ctx.adminAgendar({ horarioId: h.id, data: '2026-06-20', publicador: 'A', equipamentoId: e1.id });
-  const a2 = ctx.adminAgendar({ horarioId: h.id, data: '2026-06-20', publicador: 'B', equipamentoId: e2.id });
-  // troca de A pra C2: conflita com B → erro
+  ctx.adminAgendar({ horarioId: h.id, data: '2026-06-20', publicador: 'B', equipamentoId: e2.id });
   let erro = false;
   try { ctx.adminTrocarEquipamento(a1.id, e2.id); } catch (e) { erro = true; }
   assertTrue(erro);
-  // limpa equipamento de A: passa
   ctx.adminTrocarEquipamento(a1.id, '');
   const ag = ctx.listarAgendamentos({}).find(x => x.id === a1.id);
   assertEq(ag.equipamentoId, '');
+});
+
+test('CRUD Publicador + bloqueia duplicado por nome normalizado', () => {
+  const ctx = nova();
+  ctx.criarPublicador({ nome: 'João da Silva', telefone: '11999' });
+  assertEq(ctx.listarPublicadores(true).length, 1);
+  let erro = false;
+  try { ctx.criarPublicador({ nome: ' joão  da SILVA ' }); } catch (e) { erro = true; }
+  assertTrue(erro, 'duplicado normalizado deveria barrar');
+});
+
+test('excluirPublicadorDefinitivo bloqueia se tem agendamento; permite se só cancelados', () => {
+  const ctx = nova();
+  const p = ctx.criarPonto({ nome: 'P', lat: 0, lng: 0 });
+  const h = ctx.criarHorario({ pontoId: p.id, diaSemana: 6, horaInicio: '08:00', horaFim: '10:00', capacidade: 2 });
+  const pub = ctx.criarPublicador({ nome: 'Tício' });
+  const a = ctx.adminAgendar({ horarioId: h.id, data: '2026-06-20', publicador: 'Tício' });
+  let erro = false;
+  try { ctx.excluirPublicadorDefinitivo(pub.id); } catch (e) { erro = true; }
+  assertTrue(erro);
+  ctx.adminCancelar(a.id);
+  ctx.excluirPublicadorDefinitivo(pub.id);
+  assertEq(ctx.listarPublicadores(false).length, 0);
+});
+
+test('definirEquipamentoLocaisLote substitui todos os overrides em 1 RPC', () => {
+  const ctx = nova();
+  const e = ctx.criarEquipamento({ nome: 'C1', tipo: 'carrinho', localGuardaPadrao: 'Salão' });
+  ctx.definirEquipamentoLocaisLote(e.id, [
+    { diaSemana: 1, localGuarda: 'Praça A' },
+    { diaSemana: 6, localGuarda: 'Praça B' }
+  ]);
+  let ovs = ctx.listarEquipamentoLocais();
+  assertEq(ovs.length, 2);
+  // novo lote substitui
+  ctx.definirEquipamentoLocaisLote(e.id, [
+    { diaSemana: 6, localGuarda: 'Praça C' }
+  ]);
+  ovs = ctx.listarEquipamentoLocais();
+  assertEq(ovs.length, 1);
+  assertEq(ovs[0].localGuarda, 'Praça C');
+});
+
+test('excluirPontoDefinitivo bloqueia se tem horário; permite se limpo', () => {
+  const ctx = nova();
+  const p = ctx.criarPonto({ nome: 'P', lat: 0, lng: 0 });
+  const h = ctx.criarHorario({ pontoId: p.id, diaSemana: 6, horaInicio: '08:00', horaFim: '10:00', capacidade: 2 });
+  let erro = false;
+  try { ctx.excluirPontoDefinitivo(p.id); } catch (e) { erro = true; }
+  assertTrue(erro);
+  ctx.excluirHorarioDefinitivo(h.id);
+  ctx.excluirPontoDefinitivo(p.id);
+  assertEq(ctx.listarPontos(false).length, 0);
+});
+
+test('excluirEquipamentoDefinitivo apaga overrides em cascata', () => {
+  const ctx = nova();
+  const e = ctx.criarEquipamento({ nome: 'C1', tipo: 'carrinho' });
+  ctx.definirEquipamentoLocaisLote(e.id, [{ diaSemana: 6, localGuarda: 'X' }]);
+  ctx.excluirEquipamentoDefinitivo(e.id);
+  assertEq(ctx.listarEquipamentos(false).length, 0);
+  assertEq(ctx.listarEquipamentoLocais().length, 0);
 });
 
 test('getAgendamentosDoMes filtra por yyyy-MM e rejeita formato errado', () => {

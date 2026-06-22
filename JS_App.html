@@ -5,7 +5,7 @@
   // ====== Estado ======
   var state = {
     pontos: [], horarios: [], equipamentos: [], equipamentoLocais: [],
-    feriados: []
+    publicadores: [], feriados: []
   };
   var ui = {
     view: 'planner',
@@ -77,6 +77,7 @@
     $('#btnNovoPonto').addEventListener('click', function() { abrirPainelPonto(null); });
     $('#btnNovoEquipamento').addEventListener('click', function() { abrirPainelEquipamento(null); });
     $('#btnNovoHorario').addEventListener('click', function() { abrirPainelHorario(null); });
+    $('#btnNovoPublicador').addEventListener('click', function() { abrirPainelPublicador(null); });
 
     $('#panelFechar').addEventListener('click', fecharPainel);
     $('#panelBackdrop').addEventListener('click', fecharPainel);
@@ -93,6 +94,7 @@
       state.horarios = d.horarios || [];
       state.equipamentos = d.equipamentos || [];
       state.equipamentoLocais = d.equipamentoLocais || [];
+      state.publicadores = d.publicadores || [];
       state.feriados = d.feriados || [];
       atualizarVisaoAtual();
     }).catch(trataErro);
@@ -104,6 +106,11 @@
     else if (ui.view === 'pontos') renderPontos();
     else if (ui.view === 'equipamentos') renderEquipamentos();
     else if (ui.view === 'horarios') renderHorarios();
+    else if (ui.view === 'publicadores') renderPublicadores();
+  }
+
+  function publicadorById(id) {
+    return state.publicadores.find(function(p) { return p.id === id; }) || null;
   }
 
   function irPara(view) {
@@ -225,7 +232,7 @@
         var addHtml = podeAdicionar
           ? '<div class="slot-add" data-add-h="' + esc(h.id) + '" data-add-data="' + esc(dataYmd) + '">' +
               '<i class="bi bi-plus-circle"></i>' +
-              '<input type="text" placeholder="Adicionar irmão..." maxlength="120">' +
+              '<input type="text" list="dlPublicadores" placeholder="Adicionar irmão..." maxlength="120" autocomplete="off">' +
             '</div>'
           : '';
 
@@ -259,7 +266,21 @@
       );
     }
     $('#plannerGrid').innerHTML = html.join('');
+    renderDatalistPublicadores();
     instalarInteracoesPlanner();
+  }
+
+  function renderDatalistPublicadores() {
+    var dl = document.getElementById('dlPublicadores');
+    if (!dl) {
+      dl = document.createElement('datalist');
+      dl.id = 'dlPublicadores';
+      document.body.appendChild(dl);
+    }
+    dl.innerHTML = state.publicadores
+      .filter(function(p) { return p.ativo; })
+      .map(function(p) { return '<option value="' + esc(p.nome) + '">'; })
+      .join('');
   }
 
   function destruirSortables() {
@@ -544,7 +565,7 @@
       '</form>'
     );
     var foot = (
-      (p ? '<button class="btn btn-danger danger" id="pExcluir"><i class="bi bi-trash"></i> Desativar</button>' : '') +
+      (p ? '<button class="btn btn-danger danger" id="pExcluir"><i class="bi bi-trash"></i> Excluir</button>' : '') +
       '<button class="btn" id="pCancelar">Cancelar</button>' +
       '<button class="btn btn-primary" id="pSalvar">Salvar</button>'
     );
@@ -554,7 +575,10 @@
     $('#pLng').addEventListener('change', sincMapaInputs);
     $('#pCancelar').addEventListener('click', fecharPainel);
     $('#pSalvar').addEventListener('click', function() { salvarPonto(p && p.id); });
-    if (p) $('#pExcluir').addEventListener('click', function() { excluirPonto(p.id); });
+    if (p) $('#pExcluir').addEventListener('click', function() {
+      if (!confirm('EXCLUIR esse ponto? Bloqueia se houver horários ligados. Use o toggle Ativo pra desativar sem apagar.')) return;
+      rpc('excluirPontoDefinitivo', p.id).then(function() { tst('Ponto excluído', 'info'); fecharPainel(); carregarTudo(); }).catch(trataErro);
+    });
   }
 
   function montarMapaPonto() {
@@ -672,14 +696,17 @@
       '</form>'
     );
     var foot = (
-      (h ? '<button class="btn btn-danger danger" id="hExcluir"><i class="bi bi-trash"></i> Desativar</button>' : '') +
+      (h ? '<button class="btn btn-danger danger" id="hExcluir"><i class="bi bi-trash"></i> Excluir</button>' : '') +
       '<button class="btn" id="hCancelar">Cancelar</button>' +
       '<button class="btn btn-primary" id="hSalvar">Salvar</button>'
     );
     abrirPainel(h ? 'Editar horário' : 'Novo horário', body, foot);
     $('#hCancelar').addEventListener('click', fecharPainel);
     $('#hSalvar').addEventListener('click', function() { salvarHorario(h && h.id); });
-    if (h) $('#hExcluir').addEventListener('click', function() { excluirHorario(h.id); });
+    if (h) $('#hExcluir').addEventListener('click', function() {
+      if (!confirm('EXCLUIR esse horário? Bloqueia se tem agendamento não-cancelado. Use o toggle Ativo pra desativar.')) return;
+      rpc('excluirHorarioDefinitivo', h.id).then(function() { tst('Horário excluído', 'info'); fecharPainel(); carregarTudo(); }).catch(trataErro);
+    });
   }
   function salvarHorario(id) {
     var p = {
@@ -768,14 +795,14 @@
       '</form>'
     );
     var foot = (
-      (e ? '<button class="btn btn-danger danger" id="eExcluir"><i class="bi bi-trash"></i> Desativar</button>' : '') +
+      (e ? '<button class="btn btn-danger danger" id="eExcluir" title="Apaga a linha (se sem histórico)"><i class="bi bi-trash"></i> Excluir</button>' : '') +
       '<button class="btn" id="eCancelar">Cancelar</button>' +
       '<button class="btn btn-primary" id="eSalvar">Salvar</button>'
     );
     abrirPainel(e ? 'Editar equipamento' : 'Novo equipamento', body, foot);
     $('#eCancelar').addEventListener('click', fecharPainel);
     $('#eSalvar').addEventListener('click', function() { salvarEquipamento(e && e.id); });
-    if (e) $('#eExcluir').addEventListener('click', function() { excluirEquipamento(e.id); });
+    if (e) $('#eExcluir').addEventListener('click', function() { excluirEquipamentoDef(e.id); });
   }
   function salvarEquipamento(id) {
     var p = {
@@ -790,16 +817,87 @@
     var fn = p.id ? 'atualizarEquipamento' : 'criarEquipamento';
     rpc(fn, p).then(function(r) {
       var eqId = p.id || (r && r.id);
-      return Promise.all($$('[data-ov]').map(function(inp) {
-        return rpc('definirEquipamentoLocal', {
-          equipamentoId: eqId, diaSemana: Number(inp.dataset.ov), localGuarda: inp.value.trim()
-        });
-      }));
+      var overrides = $$('[data-ov]')
+        .map(function(inp) {
+          return { diaSemana: Number(inp.dataset.ov), localGuarda: inp.value.trim() };
+        })
+        .filter(function(o) { return o.localGuarda; });
+      return rpc('definirEquipamentoLocaisLote', eqId, overrides);
     }).then(function() { tst('Equipamento salvo', 'success'); fecharPainel(); carregarTudo(); }).catch(trataErro);
   }
   function excluirEquipamento(id) {
-    if (!confirm('Desativar esse equipamento?')) return;
+    if (!confirm('Desativar esse equipamento? (Histórico preservado.)')) return;
     rpc('excluirEquipamento', id).then(function() { tst('Equipamento desativado', 'info'); fecharPainel(); carregarTudo(); }).catch(trataErro);
+  }
+  function excluirEquipamentoDef(id) {
+    if (!confirm('EXCLUIR DEFINITIVAMENTE esse equipamento? Apaga a linha + overrides. Bloqueia se houver agendamentos.')) return;
+    rpc('excluirEquipamentoDefinitivo', id).then(function() { tst('Equipamento excluído', 'info'); fecharPainel(); carregarTudo(); }).catch(trataErro);
+  }
+
+  // ====== PUBLICADORES ======
+  function renderPublicadores() {
+    var cont = $('#publicadoresLista');
+    if (!state.publicadores.length) {
+      cont.innerHTML = '<div class="empty">Nenhum publicador cadastrado. Clique em <b>Novo publicador</b> pra começar.</div>';
+      return;
+    }
+    var html = ['<div class="list">'];
+    state.publicadores.forEach(function(p) {
+      html.push(
+        '<div class="list-row' + (p.ativo ? '' : ' inativo') + '" data-pub="' + esc(p.id) + '">' +
+          '<i class="bi bi-person ico-big"></i>' +
+          '<div style="flex:1">' +
+            '<div class="primary">' + esc(p.nome) + (p.ativo ? '' : ' <span class="pill bad">inativo</span>') + '</div>' +
+            '<div class="secondary">' + (p.telefone ? '📱 ' + esc(p.telefone) : 'sem telefone') + '</div>' +
+          '</div>' +
+        '</div>'
+      );
+    });
+    html.push('</div>');
+    cont.innerHTML = html.join('');
+    $$('.list-row[data-pub]', cont).forEach(function(r) {
+      r.addEventListener('click', function() { abrirPainelPublicador(r.dataset.pub); });
+    });
+  }
+
+  function abrirPainelPublicador(id) {
+    var p = id ? publicadorById(id) : null;
+    var body = (
+      '<form onsubmit="return false">' +
+        '<div class="field" style="margin-bottom:14px"><label>Nome *</label>' +
+          '<input class="input" id="pubNome" maxlength="120" value="' + esc(p ? p.nome : '') + '"></div>' +
+        '<div class="field" style="margin-bottom:14px"><label>Telefone</label>' +
+          '<input class="input" id="pubTel" maxlength="30" placeholder="(opcional)" value="' + esc(p ? p.telefone : '') + '"></div>' +
+        '<div class="field" style="margin-bottom:14px"><label>Notas</label>' +
+          '<textarea class="textarea" id="pubNotas" rows="2" maxlength="500">' + esc(p ? p.notas : '') + '</textarea></div>' +
+        '<label class="check"><input type="checkbox" id="pubAtivo"' + ((!p || p.ativo) ? ' checked' : '') + '> Ativo (pode agendar)</label>' +
+      '</form>'
+    );
+    var foot = (
+      (p ? '<button class="btn btn-danger danger" id="pubExcluir"><i class="bi bi-trash"></i> Excluir</button>' : '') +
+      '<button class="btn" id="pubCancelar">Cancelar</button>' +
+      '<button class="btn btn-primary" id="pubSalvar">Salvar</button>'
+    );
+    abrirPainel(p ? 'Editar publicador' : 'Novo publicador', body, foot);
+    $('#pubCancelar').addEventListener('click', fecharPainel);
+    $('#pubSalvar').addEventListener('click', function() { salvarPublicador(p && p.id); });
+    if (p) $('#pubExcluir').addEventListener('click', function() {
+      if (!confirm('EXCLUIR ' + p.nome + '? Bloqueia se há agendamentos ativos. Use Ativo=off pra desativar sem apagar.')) return;
+      rpc('excluirPublicadorDefinitivo', p.id).then(function() { tst('Publicador excluído', 'info'); fecharPainel(); carregarTudo(); }).catch(trataErro);
+    });
+  }
+
+  function salvarPublicador(id) {
+    var p = {
+      id: id || '',
+      nome: $('#pubNome').value.trim(),
+      telefone: $('#pubTel').value.trim(),
+      notas: $('#pubNotas').value.trim(),
+      ativo: $('#pubAtivo').checked
+    };
+    if (!p.nome) return tst('Nome é obrigatório', 'warn');
+    var fn = p.id ? 'atualizarPublicador' : 'criarPublicador';
+    rpc(fn, p).then(function() { tst('Publicador salvo', 'success'); fecharPainel(); carregarTudo(); }).catch(trataErro);
   }
 
   // ====== CALENDÁRIO ======

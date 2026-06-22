@@ -64,6 +64,7 @@ function ensureSheetPontos_()       { return _ensureSheet_(SHEET.PONTOS,        
 function ensureSheetHorarios_()     { return _ensureSheet_(SHEET.HORARIOS,           COL.HORARIOS.HEADER); }
 function ensureSheetEquipamentos_() { return _ensureSheet_(SHEET.EQUIPAMENTOS,       COL.EQUIPAMENTOS.HEADER); }
 function ensureSheetEqLocais_()     { return _ensureSheet_(SHEET.EQUIPAMENTO_LOCAIS, COL.EQUIPAMENTO_LOCAIS.HEADER); }
+function ensureSheetPublicadores_() { return _ensureSheet_(SHEET.PUBLICADORES,       COL.PUBLICADORES.HEADER); }
 function ensureSheetAgendamentos_() { return _ensureSheet_(SHEET.AGENDAMENTOS,       COL.AGENDAMENTOS.HEADER); }
 function ensureSheetFeriados_()     { return _ensureSheet_(SHEET.FERIADOS,           COL.FERIADOS.HEADER); }
 
@@ -72,6 +73,7 @@ function initSchema_() {
   ensureSheetHorarios_();
   ensureSheetEquipamentos_();
   ensureSheetEqLocais_();
+  ensureSheetPublicadores_();
   ensureSheetAgendamentos_();
   ensureSheetFeriados_();
 }
@@ -94,6 +96,112 @@ function _acharPorId_(sh, id) {
     }
   }
   return null;
+}
+
+// ===================== PUBLICADORES ===================================
+
+function listarPublicadores(somenteAtivos) {
+  var cached = _cacheGet_(_NS.PUBLICADORES || 'pb', somenteAtivos ? 'ativos' : 'todos');
+  if (cached) return cached;
+  var sh = ensureSheetPublicadores_();
+  var out = _todasLinhas_(sh).map(function(r) {
+    return {
+      id: String(r[COL.PUBLICADORES.ID]),
+      nome: String(r[COL.PUBLICADORES.NOME] || ''),
+      telefone: String(r[COL.PUBLICADORES.TELEFONE] || ''),
+      ativo: r[COL.PUBLICADORES.ATIVO] !== false && r[COL.PUBLICADORES.ATIVO] !== 'false',
+      notas: String(r[COL.PUBLICADORES.NOTAS] || ''),
+      criado: String(r[COL.PUBLICADORES.CRIADO] || '')
+    };
+  });
+  if (somenteAtivos) out = out.filter(function(p) { return p.ativo; });
+  out.sort(function(a, b) { return a.nome.localeCompare(b.nome, 'pt-BR'); });
+  _cachePut_(_NS.PUBLICADORES || 'pb', somenteAtivos ? 'ativos' : 'todos', out);
+  return out;
+}
+
+function _normNome_(s) {
+  return String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function _publicadorPorNome_(nome) {
+  var n = _normNome_(nome);
+  if (!n) return null;
+  var lista = listarPublicadores(false);
+  for (var i = 0; i < lista.length; i++) {
+    if (_normNome_(lista[i].nome) === n) return lista[i];
+  }
+  return null;
+}
+
+function criarPublicador(payload) {
+  return withLock_(function() {
+    var nome = sanitizar_(payload && payload.nome, 120);
+    if (!nome) throw new Error('Nome é obrigatório.');
+    if (_publicadorPorNome_(nome)) throw new Error('Já existe um publicador com esse nome.');
+    var telefone = sanitizar_(payload.telefone, 30);
+    var notas = sanitizar_(payload.notas, 500);
+    var sh = ensureSheetPublicadores_();
+    var id = gerarId_();
+    sh.appendRow([id, nome, telefone, true, notas, _ts_()]);
+    _invalidar();
+    return { id: id };
+  });
+}
+
+function atualizarPublicador(payload) {
+  return withLock_(function() {
+    var sh = ensureSheetPublicadores_();
+    var id = String(payload && payload.id || '');
+    var achado = _acharPorId_(sh, id);
+    if (!achado) throw new Error('Publicador não encontrado.');
+    var nome = sanitizar_(payload.nome, 120);
+    if (!nome) throw new Error('Nome é obrigatório.');
+    var outro = _publicadorPorNome_(nome);
+    if (outro && outro.id !== id) throw new Error('Já existe outro publicador com esse nome.');
+    sh.getRange(achado.row, 1, 1, COL.PUBLICADORES.HEADER.length).setValues([[
+      id, nome,
+      sanitizar_(payload.telefone, 30),
+      payload.ativo !== false,
+      sanitizar_(payload.notas, 500),
+      String(achado.valores[COL.PUBLICADORES.CRIADO] || _ts_())
+    ]]);
+    _invalidar();
+    return { ok: true };
+  });
+}
+
+function excluirPublicador(id) {
+  return withLock_(function() {
+    var sh = ensureSheetPublicadores_();
+    var achado = _acharPorId_(sh, id);
+    if (!achado) throw new Error('Publicador não encontrado.');
+    sh.getRange(achado.row, COL.PUBLICADORES.ATIVO_1IDX).setValue(false);
+    _invalidar();
+    return { ok: true };
+  });
+}
+
+// Exclusão DEFINITIVA: só se não tem agendamentos não-cancelados ligados.
+function excluirPublicadorDefinitivo(id) {
+  return withLock_(function() {
+    var sh = ensureSheetPublicadores_();
+    var achado = _acharPorId_(sh, id);
+    if (!achado) throw new Error('Publicador não encontrado.');
+    var nomePub = String(achado.valores[COL.PUBLICADORES.NOME] || '');
+    var shA = ensureSheetAgendamentos_();
+    var temAg = _todasLinhas_(shA).some(function(r) {
+      var st = String(r[COL.AGENDAMENTOS.STATUS] || '');
+      if (st === STATUS.CANCELADO) return false;
+      var byId = String(r[COL.AGENDAMENTOS.PUBLICADOR_ID] || '') === id;
+      var byNome = _normNome_(r[COL.AGENDAMENTOS.PUBLICADOR]) === _normNome_(nomePub);
+      return byId || byNome;
+    });
+    if (temAg) throw new Error('Não dá pra excluir: existem agendamentos ligados a esse publicador. Desative em vez disso.');
+    sh.deleteRow(achado.row);
+    _invalidar();
+    return { ok: true };
+  });
 }
 
 // ===================== PONTOS =========================================
@@ -164,6 +272,23 @@ function excluirPonto(id) {
     if (!achado) throw new Error('Ponto não encontrado.');
     // soft-delete via ativo=false (preserva histórico de agendamentos)
     sh.getRange(achado.row, COL.PONTOS.ATIVO_1IDX).setValue(false);
+    _invalidar();
+    return { ok: true };
+  });
+}
+
+function excluirPontoDefinitivo(id) {
+  return withLock_(function() {
+    var sh = ensureSheetPontos_();
+    var achado = _acharPorId_(sh, id);
+    if (!achado) throw new Error('Ponto não encontrado.');
+    // bloqueia se tem horário linkado
+    var shH = ensureSheetHorarios_();
+    var temHorario = _todasLinhas_(shH).some(function(r) {
+      return String(r[COL.HORARIOS.PONTO_ID]) === id;
+    });
+    if (temHorario) throw new Error('Esse ponto tem horários cadastrados. Apague os horários antes ou só desative o ponto.');
+    sh.deleteRow(achado.row);
     _invalidar();
     return { ok: true };
   });
@@ -255,6 +380,23 @@ function excluirHorario(id) {
   });
 }
 
+function excluirHorarioDefinitivo(id) {
+  return withLock_(function() {
+    var sh = ensureSheetHorarios_();
+    var achado = _acharPorId_(sh, id);
+    if (!achado) throw new Error('Horário não encontrado.');
+    var shA = ensureSheetAgendamentos_();
+    var temAg = _todasLinhas_(shA).some(function(r) {
+      return String(r[COL.AGENDAMENTOS.HORARIO_ID]) === id
+          && String(r[COL.AGENDAMENTOS.STATUS] || '') !== STATUS.CANCELADO;
+    });
+    if (temAg) throw new Error('Esse horário tem agendamentos não-cancelados. Cancele-os primeiro ou só desative o horário.');
+    sh.deleteRow(achado.row);
+    _invalidar();
+    return { ok: true };
+  });
+}
+
 // ===================== EQUIPAMENTOS ===================================
 
 function listarEquipamentos(somenteAtivos) {
@@ -328,6 +470,29 @@ function excluirEquipamento(id) {
   });
 }
 
+function excluirEquipamentoDefinitivo(id) {
+  return withLock_(function() {
+    var sh = ensureSheetEquipamentos_();
+    var achado = _acharPorId_(sh, id);
+    if (!achado) throw new Error('Equipamento não encontrado.');
+    var shA = ensureSheetAgendamentos_();
+    var temAg = _todasLinhas_(shA).some(function(r) {
+      return String(r[COL.AGENDAMENTOS.EQUIPAMENTO_ID] || '') === id
+          && String(r[COL.AGENDAMENTOS.STATUS] || '') !== STATUS.CANCELADO;
+    });
+    if (temAg) throw new Error('Esse equipamento tem agendamentos não-cancelados. Cancele-os primeiro.');
+    // Apaga overrides ligados também
+    var shO = ensureSheetEqLocais_();
+    var lo = _todasLinhas_(shO);
+    for (var i = lo.length - 1; i >= 0; i--) {
+      if (String(lo[i][COL.EQUIPAMENTO_LOCAIS.EQUIPAMENTO_ID]) === id) shO.deleteRow(i + 2);
+    }
+    sh.deleteRow(achado.row);
+    _invalidar();
+    return { ok: true };
+  });
+}
+
 // ===================== EQUIPAMENTO_LOCAIS (override por dia) ==========
 
 function listarEquipamentoLocais() {
@@ -356,6 +521,33 @@ function localGuardaNoDia_(equipamentoId, diaSemana) {
   }
   var eq = listarEquipamentos(false).filter(function(e) { return e.id === equipamentoId; })[0];
   return eq ? eq.localGuardaPadrao : '';
+}
+
+// Aplica os 7 overrides de uma vez (evita 7 RPCs do frontend, evita 7 locks).
+// `overrides` é um array de até 7 itens [{ diaSemana, localGuarda }].
+function definirEquipamentoLocaisLote(equipamentoId, overrides) {
+  return withLock_(function() {
+    equipamentoId = String(equipamentoId || '');
+    if (!equipamentoId) throw new Error('Equipamento é obrigatório.');
+    if (!Array.isArray(overrides)) throw new Error('Overrides inválidos.');
+    var sh = ensureSheetEqLocais_();
+    var linhas = _todasLinhas_(sh);
+    // remove tudo do equipamento (mais simples que diff)
+    for (var i = linhas.length - 1; i >= 0; i--) {
+      if (String(linhas[i][COL.EQUIPAMENTO_LOCAIS.EQUIPAMENTO_ID]) === equipamentoId) {
+        sh.deleteRow(i + 2);
+      }
+    }
+    overrides.forEach(function(o) {
+      var dia = Number(o.diaSemana);
+      if (!(dia >= 0 && dia <= 6)) return;
+      var local = sanitizar_(o.localGuarda, 240);
+      if (!local) return;
+      sh.appendRow([gerarId_(), equipamentoId, dia, local]);
+    });
+    _invalidar();
+    return { ok: true };
+  });
 }
 
 function definirEquipamentoLocal(payload) {
@@ -462,6 +654,7 @@ function _linhaParaAgendamento_(r) {
     horarioId: String(r[C.HORARIO_ID]),
     data: formatarYmd_(r[C.DATA]),
     publicador: String(r[C.PUBLICADOR] || ''),
+    publicadorId: String(r[C.PUBLICADOR_ID] || ''),
     parceiroId: String(r[C.PARCEIRO_ID] || ''),
     equipamentoId: String(r[C.EQUIPAMENTO_ID] || ''),
     status: String(r[C.STATUS] || STATUS.AGENDADO),
@@ -734,15 +927,31 @@ function adminCancelar(id) {
 }
 
 // Agenda direto pelo admin (sem PIN). Mantém race-check de capacidade
-// e conflito de equipamento — diferença é que aceita sem PIN.
+// e conflito de equipamento. Resolve publicador via publicadorId OU
+// nome (busca match case/space-insensitive). Se publicadores cadastrados
+// existem e o nome não bate, falha — admin precisa cadastrar antes.
 function adminAgendar(payload) {
   return withLock_(function() {
     var horarioId = String(payload && payload.horarioId || '');
     var data = validarData_(String(payload.data || ''));
-    var publicador = sanitizar_(payload.publicador, 120);
-    if (!publicador) throw new Error('Nome do publicador é obrigatório.');
     var equipamentoId = sanitizar_(payload.equipamentoId, 50);
     var notas = sanitizar_(payload.notas, 500);
+
+    var pubId = sanitizar_(payload.publicadorId, 50);
+    var pubNome = sanitizar_(payload.publicador, 120);
+    var pubRec = null;
+    if (pubId) {
+      pubRec = listarPublicadores(false).filter(function(p) { return p.id === pubId; })[0];
+      if (!pubRec) throw new Error('Publicador não encontrado.');
+    } else if (pubNome) {
+      pubRec = _publicadorPorNome_(pubNome);
+      if (!pubRec) {
+        throw new Error('Publicador "' + pubNome + '" não está cadastrado. Cadastre em Publicadores antes.');
+      }
+    } else {
+      throw new Error('Indique o publicador.');
+    }
+    if (!pubRec.ativo) throw new Error('"' + pubRec.nome + '" está inativo. Reative o publicador antes.');
 
     var horario = _horarioPorId_(horarioId);
     if (!horario || !horario.ativo) throw new Error('Horário inválido.');
@@ -760,9 +969,9 @@ function adminAgendar(payload) {
       if (String(r[C.HORARIO_ID]) !== horarioId) continue;
       if (formatarYmd_(r[C.DATA]) !== data) continue;
       if (String(r[C.STATUS] || '') === STATUS.CANCELADO) continue;
-      if (String(r[C.PUBLICADOR] || '').toLowerCase() === publicador.toLowerCase()) {
-        throw new Error(publicador + ' já está nesse slot.');
-      }
+      var jaId  = String(r[C.PUBLICADOR_ID] || '') === pubRec.id;
+      var jaNom = _normNome_(r[C.PUBLICADOR]) === _normNome_(pubRec.nome);
+      if (jaId || jaNom) throw new Error(pubRec.nome + ' já está nesse slot.');
     }
     if (equipamentoId && _equipamentoConflita_(linhas, equipamentoId, horarioId, data)) {
       throw new Error('Esse carrinho/display já está reservado nesse intervalo.');
@@ -770,9 +979,9 @@ function adminAgendar(payload) {
 
     var id = gerarId_();
     sh.appendRow([
-      id, horarioId, _dataLocalMeioDia_(data), publicador, '', // PIN vazio (admin)
+      id, horarioId, _dataLocalMeioDia_(data), pubRec.nome, '', // PIN vazio (admin)
       '', equipamentoId, STATUS.AGENDADO,
-      '', '', '', '', '', '', notas, _ts_()
+      '', '', '', '', '', '', notas, _ts_(), pubRec.id
     ]);
     _invalidar();
     return { id: id };
@@ -899,6 +1108,7 @@ function getDadosAdmin() {
     horarios: listarHorarios(false),
     equipamentos: listarEquipamentos(false),
     equipamentoLocais: listarEquipamentoLocais(),
+    publicadores: listarPublicadores(false),
     feriados: listarFeriados(),
     urlPublico: getScriptUrl() + '?v=publico',
     versao: getVersaoApp()

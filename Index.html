@@ -33,6 +33,9 @@
 
     <div class="nav-group">
       <div class="nav-label">Cadastros</div>
+      <div class="nav-item" data-view="publicadores">
+        <span class="ico"><i class="bi bi-people"></i></span> Publicadores
+      </div>
       <div class="nav-item" data-view="pontos">
         <span class="ico"><i class="bi bi-geo-alt"></i></span> Pontos
       </div>
@@ -83,6 +86,14 @@
         </div>
       </div>
       <div id="calGrid" class="cal-grid"></div>
+    </section>
+
+    <section data-page="publicadores" hidden>
+      <div class="page-head">
+        <div><h2>Publicadores</h2><div class="subtitle">Brothers aprovados a agendar TP</div></div>
+        <button class="btn btn-primary" id="btnNovoPublicador"><i class="bi bi-plus-lg"></i> Novo publicador</button>
+      </div>
+      <div id="publicadoresLista"></div>
     </section>
 
     <section data-page="pontos" hidden>
