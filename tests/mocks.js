@@ -117,6 +117,28 @@ function installMocks(ctx, sheets) {
   };
   ctx.Session = { getScriptTimeZone: function() { return 'GMT-3'; } };
   ctx.MailApp = { _sent: [], sendEmail: function(opts) { this._sent.push(opts); } };
+  ctx.ScriptApp = {
+    getService: function() {
+      return { getUrl: function() { return 'https://script.google.com/macros/s/MOCK/exec'; } };
+    }
+  };
+  ctx.HtmlService = {
+    XFrameOptionsMode: { ALLOWALL: 'ALLOWALL' },
+    createTemplateFromFile: function() {
+      return {
+        evaluate: function() {
+          var out = {
+            setTitle: function() { return out; },
+            addMetaTag: function() { return out; },
+            setXFrameOptionsMode: function() { return out; },
+            getContent: function() { return ''; }
+          };
+          return out;
+        }
+      };
+    },
+    createHtmlOutputFromFile: function() { return { getContent: function() { return ''; } }; }
+  };
   return ss;
 }
 
