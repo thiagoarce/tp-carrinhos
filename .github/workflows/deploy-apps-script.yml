@@ -1,0 +1,85 @@
+name: Deploy Apps Script
+
+# Toda vez que algum arquivo do Apps Script muda na main, faz `clasp push`
+# para o projeto real. Setup uma vez (ver docs/clasp-setup.md) e nunca mais
+# precisa abrir a extensão para sincronizar.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '*.gs'
+      - '*.html'
+      - 'appsscript.json'
+      - '.clasp.json'
+      - '.claspignore'
+
+  # Permite disparar manualmente pelo GitHub UI
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: clasp-deploy
+      cancel-in-progress: false  # nunca cancela um push em andamento
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Instalar clasp
+        # Range 3.x — formato novo de credenciais
+        # (tokens.default.refresh_token, compat com clasp do Cloud Shell).
+        # Range em vez de @latest pra evitar quebras de major (v4+).
+        run: npm install -g '@google/clasp@^3.0.0'
+
+      - name: Configurar credenciais do clasp
+        env:
+          CLASP_CREDENTIALS: ${{ secrets.CLASP_CREDENTIALS }}
+        run: |
+          if [ -z "$CLASP_CREDENTIALS" ]; then
+            echo "❌ Secret CLASP_CREDENTIALS não configurada. Veja docs/clasp-setup.md"
+            exit 1
+          fi
+          echo "$CLASP_CREDENTIALS" > ~/.clasprc.json
+          chmod 600 ~/.clasprc.json
+
+      - name: Verificar autenticação
+        run: |
+          clasp show-authorized-user 2>/dev/null \
+            || clasp login --status 2>/dev/null \
+            || (echo "❌ Token expirado — rode 'clasp login' local e atualize o secret" && exit 1)
+
+      - name: Injetar versão (SHA curto) no Constants.gs
+        run: |
+          SHA="${GITHUB_SHA:0:7}"
+          sed -i "s/__VERSION__/${SHA}/" Constants.gs
+          echo "📌 Versão injetada: ${SHA}"
+
+      - name: Push para Apps Script
+        run: clasp push --force
+
+      # Atualiza o deployment /exec — usa o ID guardado no secret
+      # CLASP_DEPLOYMENT_ID. Se ausente, só faz push (igual antes).
+      # Configurar uma vez: Deploy → Manage deployments → copia o
+      # deployment ID do web app → coloca no GitHub Secrets.
+      - name: Atualizar /exec (versionar deployment)
+        env:
+          CLASP_DEPLOYMENT_ID: ${{ secrets.CLASP_DEPLOYMENT_ID }}
+        run: |
+          if [ -z "$CLASP_DEPLOYMENT_ID" ]; then
+            echo "ℹ️ CLASP_DEPLOYMENT_ID não configurado — pulando atualização /exec"
+            echo "ℹ️ Crie secret CLASP_DEPLOYMENT_ID pra automatizar (ver docs/clasp-setup.md)"
+            exit 0
+          fi
+          DESC="auto $(date -u +%Y-%m-%d_%H:%M)"
+          clasp deploy --deploymentId "$CLASP_DEPLOYMENT_ID" --description "$DESC"
+          echo "✅ /exec atualizado em $DESC"
+
+      - name: Confirmar
+        run: |
+          echo "✅ Deploy concluído em $(date -u)"
+          clasp list-versions | head -5 || true

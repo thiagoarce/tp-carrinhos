@@ -1,0 +1,64 @@
+<style>
+  .th-toast-host {
+    position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+    z-index: 99999; display: flex; flex-direction: column; gap: 8px;
+    pointer-events: none; width: min(420px, 92vw);
+  }
+  .th-toast {
+    background: #fff; border-left: 4px solid #0d6efd; border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.18); padding: 12px 16px;
+    font-size: 0.92rem; color: #1a1a1a; pointer-events: auto;
+    display: flex; align-items: center; gap: 10px;
+    opacity: 0; transform: translateY(-12px);
+    transition: opacity .2s ease, transform .2s ease;
+  }
+  .th-toast.show { opacity: 1; transform: translateY(0); }
+  .th-toast.t-success { border-left-color: #198754; }
+  .th-toast.t-error   { border-left-color: #dc3545; }
+  .th-toast.t-warn    { border-left-color: #ffc107; }
+  .th-toast.t-info    { border-left-color: #0d6efd; }
+  .th-toast .ico { font-size: 1.1rem; }
+  .th-toast.t-success .ico { color: #198754; }
+  .th-toast.t-error   .ico { color: #dc3545; }
+  .th-toast.t-warn    .ico { color: #b78500; }
+  .th-toast.t-info    .ico { color: #0d6efd; }
+  .th-toast .msg { flex: 1; line-height: 1.3; }
+  .th-toast .close {
+    background: none; border: 0; color: #888; font-size: 1.1rem;
+    cursor: pointer; padding: 0 4px;
+  }
+  body.tema-escuro .th-toast { background: #2a2f33; color: #e8eef5; }
+</style>
+<script>
+  // Toast compartilhado (Publico/Dirigente/Cartas/CampanhaPublica).
+  // Standalone — não depende de JS_Core. Mesma API: window.toast(msg, tipo, dur)
+  window.toast = function(msg, tipo, duracaoMs) {
+    tipo = tipo || 'info';
+    duracaoMs = duracaoMs == null ? 3000 : duracaoMs;
+    var host = document.getElementById('thToastHost');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'thToastHost';
+      host.className = 'th-toast-host';
+      document.body.appendChild(host);
+    }
+    var icons = { success:'fa-circle-check', error:'fa-circle-exclamation', warn:'fa-triangle-exclamation', info:'fa-circle-info' };
+    var el = document.createElement('div');
+    el.className = 'th-toast t-' + tipo;
+    el.innerHTML = '<i class="fa-solid ' + (icons[tipo] || icons.info) + ' ico" aria-hidden="true"></i>' +
+                   '<div class="msg"></div>' +
+                   '<button class="close" aria-label="Fechar">&times;</button>';
+    el.querySelector('.msg').textContent = msg;
+    el.querySelector('.close').addEventListener('click', function(){ fechar(); });
+    host.appendChild(el);
+    requestAnimationFrame(function(){ el.classList.add('show'); });
+    var t = null;
+    function fechar() {
+      if (t) { clearTimeout(t); t = null; }
+      el.classList.remove('show');
+      setTimeout(function(){ if(el.parentNode) el.parentNode.removeChild(el); }, 250);
+    }
+    if (duracaoMs > 0) t = setTimeout(fechar, duracaoMs);
+    return { fechar: fechar };
+  };
+</script>

@@ -1,0 +1,14 @@
+# Tudo que NÃO deve ir para o Apps Script.
+# .gs, .html e appsscript.json vão por padrão.
+
+.github/**
+tests/**
+node_modules/**
+docs/**
+README.md
+.git/**
+.gitignore
+.claspignore
+.clasp.json
+package.json
+package-lock.json
