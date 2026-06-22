@@ -11,15 +11,13 @@
 </head>
 <body>
 
-<!-- Topbar mobile só pra abrir/fechar sidebar -->
 <div class="topbar-mobile">
-  <button class="menu-btn" id="btnMenu" aria-label="Menu"><i class="bi bi-list" style="font-size:1.4rem"></i></button>
+  <button class="menu-btn" id="btnMenu" aria-label="Menu"><i class="bi bi-list"></i></button>
   <div class="brand"><span class="dot"></span> TP-Carrinhos</div>
 </div>
 
 <div class="app">
 
-  <!-- Sidebar -->
   <aside class="sidebar" id="sidebar">
     <div class="brand"><span class="dot"></span> TP-Carrinhos</div>
 
@@ -34,41 +32,36 @@
     </div>
 
     <div class="nav-group">
-      <div class="nav-label">Configurações</div>
+      <div class="nav-label">Cadastros</div>
       <div class="nav-item" data-view="pontos">
         <span class="ico"><i class="bi bi-geo-alt"></i></span> Pontos
-      </div>
-      <div class="nav-item" data-view="horarios">
-        <span class="ico"><i class="bi bi-clock"></i></span> Horários
       </div>
       <div class="nav-item" data-view="equipamentos">
         <span class="ico"><i class="bi bi-cart3"></i></span> Equipamentos
       </div>
-      <div class="nav-item" data-view="feriados">
-        <span class="ico"><i class="bi bi-slash-circle"></i></span> Feriados
-      </div>
     </div>
 
     <div class="sidebar-footer">
-      <button class="btn btn-ghost" id="btnLinkPublico" type="button">
-        <i class="bi bi-link-45deg"></i> Copiar link publicador
+      <button class="btn btn-ghost btn-sm" id="btnConfHorarios" type="button">
+        <i class="bi bi-clock"></i> Horários recorrentes
       </button>
-      <button class="btn btn-ghost" id="btnRecarregar" type="button">
-        <i class="bi bi-arrow-clockwise"></i> Recarregar dados
+      <button class="btn btn-ghost btn-sm" id="btnLinkPublico" type="button">
+        <i class="bi bi-link-45deg"></i> Link publicador
+      </button>
+      <button class="btn btn-ghost btn-sm" id="btnRecarregar" type="button">
+        <i class="bi bi-arrow-clockwise"></i> Recarregar
       </button>
       <div class="versao">v<?= versao ?></div>
     </div>
   </aside>
 
-  <!-- Conteúdo principal -->
   <main class="main" id="main">
 
-    <!-- ====== Planner semanal ====== -->
     <section data-page="planner">
       <div class="page-head">
         <div>
           <h2>Planner semanal</h2>
-          <div class="subtitle" id="plannerSub"></div>
+          <div class="subtitle" id="plannerSub">Adicione irmãos clicando no slot, arraste pra mover</div>
         </div>
         <div class="planner-head">
           <button class="btn btn-icon" id="weekPrev" aria-label="Semana anterior"><i class="bi bi-chevron-left"></i></button>
@@ -80,7 +73,6 @@
       <div class="planner" id="plannerGrid"></div>
     </section>
 
-    <!-- ====== Visão mensal ====== -->
     <section data-page="calendario" hidden>
       <div class="page-head">
         <h2>Visão mensal</h2>
@@ -91,15 +83,8 @@
         </div>
       </div>
       <div id="calGrid" class="cal-grid"></div>
-      <div style="margin-top:10px; color:var(--muted); font-size:.82rem; display:flex; flex-wrap:wrap; gap:14px">
-        <span><span class="pill muted">●</span> vazio</span>
-        <span><span class="pill warn">●</span> parcial</span>
-        <span><span class="pill ok">●</span> cheio</span>
-        <span><span class="pill bad">●</span> lotado</span>
-      </div>
     </section>
 
-    <!-- ====== Pontos ====== -->
     <section data-page="pontos" hidden>
       <div class="page-head">
         <div><h2>Pontos de TP</h2><div class="subtitle">Locais fixos onde os carrinhos ficam</div></div>
@@ -108,16 +93,6 @@
       <div id="pontosLista"></div>
     </section>
 
-    <!-- ====== Horários ====== -->
-    <section data-page="horarios" hidden>
-      <div class="page-head">
-        <div><h2>Horários</h2><div class="subtitle">Recorrentes por ponto e dia da semana</div></div>
-        <button class="btn btn-primary" id="btnNovoHorario"><i class="bi bi-plus-lg"></i> Novo horário</button>
-      </div>
-      <div id="horariosLista"></div>
-    </section>
-
-    <!-- ====== Equipamentos ====== -->
     <section data-page="equipamentos" hidden>
       <div class="page-head">
         <div><h2>Carrinhos e Displays</h2><div class="subtitle">Equipamentos da congregação</div></div>
@@ -126,19 +101,17 @@
       <div id="equipamentosLista"></div>
     </section>
 
-    <!-- ====== Feriados ====== -->
-    <section data-page="feriados" hidden>
+    <section data-page="horarios" hidden>
       <div class="page-head">
-        <div><h2>Feriados</h2><div class="subtitle">Datas que cancelam TP</div></div>
-        <button class="btn btn-primary" id="btnNovoFeriado"><i class="bi bi-plus-lg"></i> Novo feriado</button>
+        <div><h2>Horários recorrentes</h2><div class="subtitle">Mexe pouco — define o esqueleto da semana</div></div>
+        <button class="btn btn-primary" id="btnNovoHorario"><i class="bi bi-plus-lg"></i> Novo horário</button>
       </div>
-      <div id="feriadosLista"></div>
+      <div id="horariosLista"></div>
     </section>
 
   </main>
 </div>
 
-<!-- ====== Painel lateral direito (genérico) ====== -->
 <div class="panel-backdrop" id="panelBackdrop"></div>
 <aside class="panel" id="panel">
   <div class="panel-head">
@@ -152,6 +125,7 @@
 <?!= include('JS_ToastPublico') ?>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js" defer></script>
 <script>
   var URL_PUBLICO = "<?= urlPublico ?>";
   var URL_ADMIN   = "<?= urlAdmin ?>";

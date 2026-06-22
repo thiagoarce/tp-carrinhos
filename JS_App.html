@@ -2,24 +2,25 @@
 (function() {
   'use strict';
 
-  // ============== Estado ==============
+  // ====== Estado ======
   var state = {
     pontos: [], horarios: [], equipamentos: [], equipamentoLocais: [],
-    feriados: [], agendamentosSemana: {}, agendamentosMes: []
+    feriados: []
   };
   var ui = {
     view: 'planner',
     semanaInicio: inicioDaSemana(new Date()),
     mesAtual: ymdHoje().substring(0, 7),
-    panelAtivo: null, // contexto livre (slot, ponto, etc.)
-    mapa: null, marcador: null
+    agsSemana: [],            // cache leve dos agendamentos da semana atual
+    mapa: null, marcador: null,
+    sortables: []             // referências dos Sortable pra destruir ao re-render
   };
 
   var DIAS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
   var DIAS_CURTOS = ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB'];
   var MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 
-  // ============== Utils ==============
+  // ====== Utils ======
   function $(s, root) { return (root || document).querySelector(s); }
   function $$(s, root) { return Array.prototype.slice.call((root || document).querySelectorAll(s)); }
   function esc(s) {
@@ -28,12 +29,9 @@
       .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
   function tst(m, t, d) { if (window.toast) window.toast(m, t, d); }
-  function ymdHoje() {
-    var d = new Date();
-    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
-  }
   function pad(n) { return String(n).padStart(2, '0'); }
   function ymd(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+  function ymdHoje() { return ymd(new Date()); }
   function inicioDaSemana(d) {
     var x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
     x.setDate(x.getDate() - x.getDay()); // domingo
@@ -44,12 +42,7 @@
     x.setDate(x.getDate() + n);
     return x;
   }
-  function fmtData(d, fmt) {
-    // fmt: 'dd/MM' | 'dd/MM/yyyy'
-    var s = pad(d.getDate()) + '/' + pad(d.getMonth() + 1);
-    if (fmt === 'dd/MM/yyyy') s += '/' + d.getFullYear();
-    return s;
-  }
+  function fmtDataCurta(d) { return pad(d.getDate()) + '/' + pad(d.getMonth() + 1); }
   function rpc(nome) {
     var args = Array.prototype.slice.call(arguments, 1);
     return new Promise(function(resolve, reject) {
@@ -62,10 +55,9 @@
     console.error(err);
   }
 
-  // ============== Boot ==============
+  // ====== Boot ======
   document.addEventListener('DOMContentLoaded', boot);
   function boot() {
-    // Nav lateral
     $$('[data-view]').forEach(function(el) {
       el.addEventListener('click', function() { irPara(el.dataset.view); });
     });
@@ -74,23 +66,18 @@
     $('#btnRecarregar').addEventListener('click', function() {
       rpc('limparCacheServidor').then(carregarTudo);
     });
+    $('#btnConfHorarios').addEventListener('click', function() { irPara('horarios'); });
 
-    // Planner
     $('#weekPrev').addEventListener('click', function() { ui.semanaInicio = adicionarDias(ui.semanaInicio, -7); renderPlanner(); });
     $('#weekNext').addEventListener('click', function() { ui.semanaInicio = adicionarDias(ui.semanaInicio, 7); renderPlanner(); });
     $('#weekToday').addEventListener('click', function() { ui.semanaInicio = inicioDaSemana(new Date()); renderPlanner(); });
-
-    // Mensal
     $('#calPrev').addEventListener('click', function() { mudarMes(-1); });
     $('#calNext').addEventListener('click', function() { mudarMes(1); });
 
-    // CRUDs novos
     $('#btnNovoPonto').addEventListener('click', function() { abrirPainelPonto(null); });
-    $('#btnNovoHorario').addEventListener('click', function() { abrirPainelHorario(null); });
     $('#btnNovoEquipamento').addEventListener('click', function() { abrirPainelEquipamento(null); });
-    $('#btnNovoFeriado').addEventListener('click', function() { abrirPainelFeriado(); });
+    $('#btnNovoHorario').addEventListener('click', function() { abrirPainelHorario(null); });
 
-    // Painel
     $('#panelFechar').addEventListener('click', fecharPainel);
     $('#panelBackdrop').addEventListener('click', fecharPainel);
     document.addEventListener('keydown', function(e) {
@@ -107,7 +94,6 @@
       state.equipamentos = d.equipamentos || [];
       state.equipamentoLocais = d.equipamentoLocais || [];
       state.feriados = d.feriados || [];
-      // re-render current view
       atualizarVisaoAtual();
     }).catch(trataErro);
   }
@@ -116,9 +102,8 @@
     if (ui.view === 'planner') renderPlanner();
     else if (ui.view === 'calendario') renderCalendario();
     else if (ui.view === 'pontos') renderPontos();
-    else if (ui.view === 'horarios') renderHorarios();
     else if (ui.view === 'equipamentos') renderEquipamentos();
-    else if (ui.view === 'feriados') renderFeriados();
+    else if (ui.view === 'horarios') renderHorarios();
   }
 
   function irPara(view) {
@@ -139,221 +124,274 @@
     }
   }
 
-  // ============== Painel lateral genérico ==============
+  // ====== Painel lateral ======
   function abrirPainel(titulo, bodyHtml, foot) {
     $('#panelTitulo').textContent = titulo;
     $('#panelBody').innerHTML = bodyHtml;
     var foot$ = $('#panelFoot');
-    if (foot) {
-      foot$.hidden = false;
-      foot$.innerHTML = foot;
-    } else {
-      foot$.hidden = true;
-      foot$.innerHTML = '';
-    }
+    if (foot) { foot$.hidden = false; foot$.innerHTML = foot; }
+    else      { foot$.hidden = true;  foot$.innerHTML = ''; }
     $('#panel').classList.add('open');
     $('#panelBackdrop').classList.add('show');
   }
   function fecharPainel() {
     $('#panel').classList.remove('open');
     $('#panelBackdrop').classList.remove('show');
-    ui.panelAtivo = null;
-    // limpa mapa caso esteja vivo
     if (ui.mapa) { try { ui.mapa.remove(); } catch (e) {} ui.mapa = null; ui.marcador = null; }
   }
 
-  // ============== Helpers de domínio ==============
-  function pontoById(id) { return state.pontos.find(function(p) { return p.id === id; }) || null; }
-  function horarioById(id) { return state.horarios.find(function(h) { return h.id === id; }) || null; }
-  function equipamentoById(id) { return state.equipamentos.find(function(e) { return e.id === id; }) || null; }
+  // ====== Helpers de domínio ======
+  function pontoById(id)      { return state.pontos.find(function(p) { return p.id === id; }) || null; }
+  function horarioById(id)    { return state.horarios.find(function(h) { return h.id === id; }) || null; }
+  function equipamentoById(id){ return state.equipamentos.find(function(e) { return e.id === id; }) || null; }
 
-  function feriadoNoDia(yyyymmdd, pontoId) {
-    var geral = null, doPonto = null;
-    state.feriados.forEach(function(f) {
-      if (f.data !== yyyymmdd) return;
-      if (!f.pontoId) geral = f;
-      else if (f.pontoId === pontoId) doPonto = f;
-    });
-    return doPonto || geral;
-  }
-
-  // ============== PLANNER SEMANAL ==============
+  // ====== PLANNER ======
   function renderPlanner() {
     var ini = ui.semanaInicio;
     var fim = adicionarDias(ini, 6);
-    $('#weekRange').textContent = fmtData(ini, 'dd/MM') + ' – ' + fmtData(fim, 'dd/MM/yyyy');
-    $('#plannerSub').textContent = 'Semana de ' + DIAS[ini.getDay()] + ' a ' + DIAS[fim.getDay()];
+    $('#weekRange').textContent = fmtDataCurta(ini) + ' – ' + fmtDataCurta(fim) + '/' + fim.getFullYear();
 
-    // Busca agendamentos da semana (1 chamada do mês, filtra)
     var mesIni = ini.getFullYear() + '-' + pad(ini.getMonth() + 1);
     var mesFim = fim.getFullYear() + '-' + pad(fim.getMonth() + 1);
-    var promessa = mesIni === mesFim
+    var p = mesIni === mesFim
       ? rpc('getAgendamentosDoMes', mesIni)
       : Promise.all([rpc('getAgendamentosDoMes', mesIni), rpc('getAgendamentosDoMes', mesFim)])
           .then(function(arr) { return arr[0].concat(arr[1]); });
 
-    promessa.then(function(ags) {
+    p.then(function(ags) {
+      ui.agsSemana = ags;
       desenharPlanner(ini, ags);
     }).catch(trataErro);
   }
 
   function desenharPlanner(ini, ags) {
+    destruirSortables();
     var hoje = ymdHoje();
-    var hMap = {};
-    state.horarios.filter(function(h) { return h.ativo; }).forEach(function(h) { hMap[h.id] = h; });
-    var pMap = {};
+    var pMap = {}, hMap = {}, eqMap = {};
     state.pontos.forEach(function(p) { pMap[p.id] = p; });
+    state.horarios.forEach(function(h) { hMap[h.id] = h; });
+    state.equipamentos.forEach(function(e) { eqMap[e.id] = e; });
 
-    // Index: ocupação e inscritos por (data, horarioId)
-    var ocup = {}, inscritos = {};
+    var inscritos = {};
     ags.forEach(function(a) {
       if (a.status === 'cancelado') return;
       var k = a.data + '|' + a.horarioId;
-      ocup[k] = (ocup[k] || 0) + 1;
       if (!inscritos[k]) inscritos[k] = [];
       inscritos[k].push(a);
     });
 
-    // index horarios por diaSemana
     var horsPorDia = [[], [], [], [], [], [], []];
-    Object.keys(hMap).forEach(function(id) {
-      var h = hMap[id];
+    state.horarios.filter(function(h) { return h.ativo; }).forEach(function(h) {
       var p = pMap[h.pontoId];
       if (!p || !p.ativo) return;
       horsPorDia[h.diaSemana].push(h);
     });
-    for (var d = 0; d < 7; d++) {
-      horsPorDia[d].sort(function(a, b) {
-        return a.horaInicio.localeCompare(b.horaInicio) || (pMap[a.pontoId].nome || '').localeCompare(pMap[b.pontoId].nome || '');
+    horsPorDia.forEach(function(arr) {
+      arr.sort(function(a, b) {
+        return a.horaInicio.localeCompare(b.horaInicio) ||
+               (pMap[a.pontoId].nome || '').localeCompare(pMap[b.pontoId].nome || '');
       });
-    }
+    });
 
     var html = [];
     for (var i = 0; i < 7; i++) {
-      var dia = adicionarDias(ini, i);
-      var dataYmd = ymd(dia);
-      var diaSem = dia.getDay();
-      var fer = feriadoNoDia(dataYmd, null);
+      var d = adicionarDias(ini, i);
+      var dataYmd = ymd(d);
+      var diaSem = d.getDay();
       var classes = ['day-col'];
       if (dataYmd === hoje) classes.push('hoje');
-      if (fer) classes.push('feriado');
-
-      var slotsHtml = [];
-      if (fer) {
-        slotsHtml.push('<div class="feriado-tag">⛔ ' + esc(fer.nome) + '</div>');
-      }
-      horsPorDia[diaSem].forEach(function(h) {
+      var slotsHtml = horsPorDia[diaSem].map(function(h) {
         var p = pMap[h.pontoId];
-        var ferP = feriadoNoDia(dataYmd, p.id);
-        if (ferP && !fer) {
-          slotsHtml.push('<div class="slot" style="opacity:.6">' +
-            '<div class="titulo">' + esc(p.nome) + '</div>' +
-            '<div class="meta"><span>' + esc(h.horaInicio.substring(0,5)) + '–' + esc(h.horaFim.substring(0,5)) + '</span>' +
-            '<span class="pill muted">feriado</span></div>' +
-          '</div>');
-          return;
-        }
         var k = dataYmd + '|' + h.id;
-        var n = ocup[k] || 0;
-        var cap = h.capacidade;
-        var cls = 'vazio';
-        if (n >= cap) cls = (n > cap ? 'lotado' : 'cheio');
-        else if (n > 0) cls = 'parcial';
-        var pessoasResumo = (inscritos[k] || []).slice(0, 3).map(function(a) {
-          return esc(a.publicador.split(' ')[0]);
-        }).join(', ');
-        if ((inscritos[k] || []).length > 3) pessoasResumo += '…';
-        slotsHtml.push(
-          '<div class="slot ' + cls + '" data-slot="' + esc(h.id) + '|' + dataYmd + '">' +
-            '<div class="titulo">' + esc(p.nome) + '</div>' +
-            '<div class="meta">' +
-              '<span>' + esc(h.horaInicio.substring(0,5)) + '–' + esc(h.horaFim.substring(0,5)) + '</span>' +
-              '<span><strong>' + n + '</strong>/' + cap + '</span>' +
+        var lista = inscritos[k] || [];
+        var n = lista.length, cap = h.capacidade;
+        var cls = n === 0 ? 'vazio' : (n > cap ? 'lotado' : (n >= cap ? 'cheio' : 'parcial'));
+
+        var chips = lista.map(function(a) {
+          var eqNome = a.equipamentoId && eqMap[a.equipamentoId] ? eqMap[a.equipamentoId].nome : '';
+          var nomeChip = a.publicador.split(' ').slice(0, 2).join(' ');
+          return (
+            '<div class="pessoa-chip st-' + esc(a.status) + '" data-ag-id="' + esc(a.id) + '" tabindex="0">' +
+              '<span class="nome">' + esc(nomeChip) + '</span>' +
+              (eqNome ? '<span class="pessoa-equip">🛒 ' + esc(eqNome) + '</span>' : '') +
+              '<div class="acoes">' +
+                '<button data-act="abrir" title="Abrir detalhes"><i class="bi bi-three-dots"></i></button>' +
+              '</div>' +
+            '</div>'
+          );
+        }).join('');
+
+        var podeAdicionar = n < cap;
+        var addHtml = podeAdicionar
+          ? '<div class="slot-add" data-add-h="' + esc(h.id) + '" data-add-data="' + esc(dataYmd) + '">' +
+              '<i class="bi bi-plus-circle"></i>' +
+              '<input type="text" placeholder="Adicionar irmão..." maxlength="120">' +
+            '</div>'
+          : '';
+
+        return (
+          '<div class="slot ' + cls + '" data-slot-h="' + esc(h.id) + '" data-slot-data="' + esc(dataYmd) + '">' +
+            '<div class="slot-head" data-slot-open>' +
+              '<div>' +
+                '<div class="slot-titulo">' + esc(p.nome) + '</div>' +
+                '<div class="slot-hora">' + esc(h.horaInicio.substring(0,5)) + '–' + esc(h.horaFim.substring(0,5)) + '</div>' +
+              '</div>' +
+              '<div class="slot-cap"><strong>' + n + '</strong>/' + cap + '</div>' +
             '</div>' +
-            (pessoasResumo ? '<div class="pessoas">' + pessoasResumo + '</div>' : '') +
+            '<div class="slot-pessoas" data-pessoas="1">' + chips + '</div>' +
+            addHtml +
           '</div>'
         );
-      });
-      if (!slotsHtml.length) {
-        slotsHtml.push('<div style="color:var(--muted); font-size:.78rem; text-align:center; padding:8px 4px">sem horário</div>');
+      }).join('');
+
+      if (!horsPorDia[diaSem].length) {
+        slotsHtml = '<div style="color:var(--muted); font-size:.85rem; text-align:center; padding:18px 4px">sem horário</div>';
       }
 
       html.push(
         '<div class="' + classes.join(' ') + '">' +
           '<div class="day-head">' +
             '<span class="dia-nome">' + DIAS_CURTOS[diaSem] + '</span>' +
-            '<span class="dia-num">' + dia.getDate() + '/' + pad(dia.getMonth() + 1) + '</span>' +
+            '<span class="dia-num">' + fmtDataCurta(d) + '</span>' +
           '</div>' +
-          '<div class="day-body">' + slotsHtml.join('') + '</div>' +
+          '<div class="day-body">' + slotsHtml + '</div>' +
         '</div>'
       );
     }
     $('#plannerGrid').innerHTML = html.join('');
-
-    $$('[data-slot]').forEach(function(el) {
-      el.addEventListener('click', function() {
-        var parts = el.dataset.slot.split('|');
-        abrirPainelSlot(parts[0], parts[1]);
-      });
-    });
+    instalarInteracoesPlanner();
   }
 
-  // ============== Painel: detalhe do slot ==============
+  function destruirSortables() {
+    ui.sortables.forEach(function(s) { try { s.destroy(); } catch (e) {} });
+    ui.sortables = [];
+  }
+
+  function instalarInteracoesPlanner() {
+    // Click no head do slot abre painel detalhe
+    $$('[data-slot-open]').forEach(function(el) {
+      el.addEventListener('click', function() {
+        var slot = el.closest('.slot');
+        abrirPainelSlot(slot.dataset.slotH, slot.dataset.slotData);
+      });
+    });
+
+    // Click no chip (qualquer parte exceto drag) abre detalhes
+    $$('.pessoa-chip').forEach(function(chip) {
+      chip.addEventListener('click', function(e) {
+        if (e.target.closest('.acoes')) return; // botões do chip cuidam
+        abrirPainelAgendamento(chip.dataset.agId);
+      });
+      var btnAbrir = chip.querySelector('[data-act="abrir"]');
+      if (btnAbrir) btnAbrir.addEventListener('click', function(ev) {
+        ev.stopPropagation();
+        abrirPainelAgendamento(chip.dataset.agId);
+      });
+    });
+
+    // Adicionar irmão inline
+    $$('.slot-add').forEach(function(addEl) {
+      var input = addEl.querySelector('input');
+      input.addEventListener('focus', function() { addEl.classList.add('editando'); });
+      input.addEventListener('blur', function() {
+        if (!input.value.trim()) addEl.classList.remove('editando');
+      });
+      input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          var nome = input.value.trim();
+          if (!nome) return;
+          var horarioId = addEl.dataset.addH;
+          var data = addEl.dataset.addData;
+          input.disabled = true;
+          rpc('adminAgendar', { horarioId: horarioId, data: data, publicador: nome })
+            .then(function() {
+              tst(nome + ' adicionado', 'success', 2000);
+              renderPlanner();
+            })
+            .catch(function(err) {
+              input.disabled = false;
+              trataErro(err);
+            });
+        } else if (e.key === 'Escape') {
+          input.value = '';
+          input.blur();
+        }
+      });
+    });
+
+    // Drag & drop entre slots
+    if (window.Sortable) {
+      $$('[data-pessoas]').forEach(function(container) {
+        var s = window.Sortable.create(container, {
+          group: 'ags',
+          animation: 180,
+          ghostClass: 'dragging',
+          onStart: function(evt) {
+            // visual feedback opcional
+          },
+          onAdd: function(evt) {
+            var chip = evt.item;
+            var destinoSlot = container.closest('.slot');
+            var agId = chip.dataset.agId;
+            var novoHorarioId = destinoSlot.dataset.slotH;
+            var novaData = destinoSlot.dataset.slotData;
+            rpc('adminMoverAgendamento', { id: agId, novoHorarioId: novoHorarioId, novaData: novaData })
+              .then(function() {
+                tst('Agendamento movido', 'success', 2000);
+                renderPlanner();
+              })
+              .catch(function(err) {
+                trataErro(err);
+                renderPlanner(); // restaura estado correto
+              });
+          }
+        });
+        ui.sortables.push(s);
+      });
+    }
+  }
+
+  // ====== Painel: detalhe do slot ======
   function abrirPainelSlot(horarioId, dataYmd) {
     var h = horarioById(horarioId);
     if (!h) return;
     var p = pontoById(h.pontoId);
-    rpc('listarAgendamentos', { data: dataYmd, horarioId: horarioId }).then(function(ags) {
-      var eqMap = {};
-      state.equipamentos.forEach(function(e) { eqMap[e.id] = e; });
-      var corpo = [];
-      corpo.push(
-        '<div class="card" style="margin-bottom:14px">' +
-          '<div style="display:flex;justify-content:space-between;align-items:start;gap:8px">' +
-            '<div>' +
-              '<div style="font-weight:600;font-size:1rem">' + esc(p ? p.nome : '?') + '</div>' +
-              '<div class="subtitle" style="color:var(--muted);font-size:.85rem">' + DIAS[h.diaSemana] + ' · ' + esc(h.horaInicio) + ' – ' + esc(h.horaFim) + '</div>' +
-              '<div class="subtitle" style="color:var(--muted);font-size:.85rem">' + esc(dataYmd) + ' · capacidade ' + h.capacidade + '</div>' +
-            '</div>' +
-            '<div class="pill ' + (ags.length >= h.capacidade ? 'ok' : (ags.length > 0 ? 'warn' : 'muted')) + '">' +
-              ags.length + '/' + h.capacidade + ' inscritos' +
-            '</div>' +
-          '</div>' +
-        '</div>'
-      );
+    var ags = ui.agsSemana.filter(function(a) {
+      return a.horarioId === horarioId && a.data === dataYmd && a.status !== 'cancelado';
+    });
+    var corpo = [
+      '<div style="margin-bottom:16px">' +
+        '<div style="font-size:1.1rem;font-weight:600">' + esc(p ? p.nome : '?') + '</div>' +
+        '<div style="color:var(--muted)">' + DIAS[h.diaSemana] + ' · ' + esc(h.horaInicio) + ' – ' + esc(h.horaFim) +
+        ' · ' + esc(dataYmd) + '</div>' +
+        '<div style="margin-top:6px"><span class="pill ' +
+          (ags.length >= h.capacidade ? 'ok' : (ags.length > 0 ? 'warn' : 'muted')) + '">' +
+          ags.length + '/' + h.capacidade + ' inscritos</span></div>' +
+      '</div>'
+    ];
 
-      if (!ags.length) {
-        corpo.push('<div class="empty">Ninguém agendado nesse slot ainda.</div>');
-      } else {
-        corpo.push('<div class="card">');
-        ags.forEach(function(a) {
-          var eqNome = a.equipamentoId && eqMap[a.equipamentoId] ? eqMap[a.equipamentoId].nome : '';
-          corpo.push(
-            '<div class="person-row">' +
-              '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">' +
-                '<div style="font-weight:600">' + esc(a.publicador) + '</div>' +
-                '<span class="pill ' + statusPill(a.status) + '">' + esc(a.status) + '</span>' +
-              '</div>' +
-              (eqNome ? '<div style="color:var(--muted);font-size:.83rem;margin-top:2px">🛒 ' + esc(eqNome) + '</div>' : '') +
-              (a.checkIn ? '<div style="color:var(--ok);font-size:.78rem;margin-top:2px">✓ entrada ' + esc(a.checkIn) + '</div>' : '') +
-              (a.checkOut ? '<div style="color:var(--muted);font-size:.78rem">✓ saída ' + esc(a.checkOut) + '</div>' : '') +
-              '<div class="acoes">' +
-                (a.status === 'agendado' ? '<button class="btn btn-xs" data-act="checkin" data-id="' + esc(a.id) + '"><i class="bi bi-box-arrow-in-right"></i> Check-in</button>' : '') +
-                (a.status === 'presente' ? '<button class="btn btn-xs" data-act="checkout" data-id="' + esc(a.id) + '"><i class="bi bi-box-arrow-right"></i> Check-out</button>' : '') +
-                (a.status === 'agendado' ? '<button class="btn btn-xs" data-act="ausente" data-id="' + esc(a.id) + '"><i class="bi bi-person-x"></i> Ausente</button>' : '') +
-                (a.status !== 'cancelado' && a.status !== 'concluido' ? '<button class="btn btn-xs btn-danger" data-act="cancelar" data-id="' + esc(a.id) + '"><i class="bi bi-x-circle"></i> Cancelar</button>' : '') +
-              '</div>' +
-            '</div>'
-          );
-        });
-        corpo.push('</div>');
-      }
-
-      abrirPainel('Slot', corpo.join(''));
-      $$('#panelBody [data-act]').forEach(function(b) {
-        b.addEventListener('click', function() { acaoAgendamento(b.dataset.act, b.dataset.id, horarioId, dataYmd); });
+    if (!ags.length) {
+      corpo.push('<div class="empty">Ninguém ainda. Adicione direto no slot do planner.</div>');
+    } else {
+      corpo.push('<div class="card" style="padding:8px">');
+      ags.forEach(function(a) {
+        corpo.push(
+          '<div style="padding:10px 8px;border-bottom:1px solid var(--border)">' +
+            '<div style="font-weight:600">' + esc(a.publicador) + '</div>' +
+            '<div style="color:var(--muted);font-size:.85rem;margin:2px 0 6px">' +
+              '<span class="pill ' + statusPill(a.status) + '">' + esc(a.status) + '</span>' +
+            '</div>' +
+            '<button class="btn btn-xs" data-abrir-ag="' + esc(a.id) + '">Detalhes / ações</button>' +
+          '</div>'
+        );
       });
-    }).catch(trataErro);
+      corpo.push('</div>');
+    }
+    abrirPainel('Slot · ' + (p ? p.nome : ''), corpo.join(''));
+    $$('#panelBody [data-abrir-ag]').forEach(function(b) {
+      b.addEventListener('click', function() { abrirPainelAgendamento(b.dataset.abrirAg); });
+    });
   }
 
   function statusPill(st) {
@@ -361,48 +399,87 @@
          : st === 'presente'  ? 'ok'
          : st === 'agendado'  ? 'accent'
          : st === 'ausente'   ? 'warn'
-         : st === 'cancelado' ? 'bad'
-         : 'muted';
+         : st === 'cancelado' ? 'bad' : 'muted';
   }
 
-  function acaoAgendamento(act, id, horarioId, dataYmd) {
-    if (act === 'checkin') {
-      rpc('adminCheckIn', id).then(function() { tst('Check-in feito', 'success'); abrirPainelSlot(horarioId, dataYmd); renderPlanner(); }).catch(trataErro);
-    } else if (act === 'checkout') {
-      abrirPainelCheckout(id, horarioId, dataYmd);
-    } else if (act === 'ausente') {
-      if (!confirm('Marcar como ausente?')) return;
-      rpc('adminMarcarAusente', id).then(function() { tst('Marcado ausente', 'info'); abrirPainelSlot(horarioId, dataYmd); renderPlanner(); }).catch(trataErro);
-    } else if (act === 'cancelar') {
-      if (!confirm('Cancelar esse agendamento? O brother perde a vaga.')) return;
-      rpc('adminCancelar', id).then(function() { tst('Cancelado', 'info'); abrirPainelSlot(horarioId, dataYmd); renderPlanner(); }).catch(trataErro);
-    }
+  // ====== Painel: detalhe do agendamento (ações) ======
+  function abrirPainelAgendamento(agId) {
+    var a = ui.agsSemana.find(function(x) { return x.id === agId; });
+    if (!a) { tst('Agendamento não encontrado nesta semana', 'warn'); return; }
+    var h = horarioById(a.horarioId);
+    var p = h ? pontoById(h.pontoId) : null;
+    var eqAtual = a.equipamentoId ? equipamentoById(a.equipamentoId) : null;
+    var eqOpts = ['<option value="">— Sem equipamento —</option>'];
+    state.equipamentos.filter(function(e) { return e.ativo; }).forEach(function(e) {
+      eqOpts.push('<option value="' + esc(e.id) + '"' +
+        (a.equipamentoId === e.id ? ' selected' : '') + '>' +
+        esc(e.nome) + ' (' + esc(e.tipo) + ')</option>');
+    });
+
+    var corpo = (
+      '<div style="margin-bottom:18px">' +
+        '<div style="font-size:1.2rem;font-weight:600">' + esc(a.publicador) + '</div>' +
+        '<div style="color:var(--muted)">' + (p ? esc(p.nome) : '?') + ' · ' +
+        (h ? esc(h.horaInicio) + '–' + esc(h.horaFim) : '') + ' · ' + esc(a.data) + '</div>' +
+        '<div style="margin-top:8px"><span class="pill ' + statusPill(a.status) + '">' + esc(a.status) + '</span></div>' +
+        (a.checkIn ? '<div style="margin-top:8px;color:var(--ok);font-size:.85rem">✓ Entrada: ' + esc(a.checkIn) + '</div>' : '') +
+        (a.checkOut ? '<div style="color:var(--muted);font-size:.85rem">✓ Saída: ' + esc(a.checkOut) + '</div>' : '') +
+      '</div>' +
+      '<div class="field" style="margin-bottom:14px"><label>Carrinho/Display</label>' +
+        '<select class="select" id="agEq">' + eqOpts.join('') + '</select></div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px">' +
+        (a.status === 'agendado' ? '<button class="btn btn-sm" data-ac="checkin"><i class="bi bi-box-arrow-in-right"></i> Check-in</button>' : '') +
+        (a.status === 'presente' ? '<button class="btn btn-sm btn-primary" data-ac="checkout"><i class="bi bi-box-arrow-right"></i> Check-out</button>' : '') +
+        (a.status === 'agendado' ? '<button class="btn btn-sm" data-ac="ausente"><i class="bi bi-person-x"></i> Marcar ausente</button>' : '') +
+        (a.status !== 'cancelado' && a.status !== 'concluido' ? '<button class="btn btn-sm btn-danger" data-ac="cancelar"><i class="bi bi-x-circle"></i> Cancelar</button>' : '') +
+      '</div>'
+    );
+    abrirPainel('Detalhes', corpo);
+
+    $('#agEq').addEventListener('change', function() {
+      rpc('adminTrocarEquipamento', a.id, $('#agEq').value)
+        .then(function() { tst('Carrinho atualizado', 'success', 2000); renderPlanner(); })
+        .catch(function(err) { trataErro(err); $('#agEq').value = a.equipamentoId || ''; });
+    });
+    $$('#panelBody [data-ac]').forEach(function(b) {
+      b.addEventListener('click', function() {
+        var act = b.dataset.ac;
+        if (act === 'checkin') {
+          rpc('adminCheckIn', a.id).then(function() { tst('Check-in feito', 'success'); fecharPainel(); renderPlanner(); }).catch(trataErro);
+        } else if (act === 'checkout') {
+          abrirPainelCheckout(a.id);
+        } else if (act === 'ausente') {
+          if (!confirm('Marcar ' + a.publicador + ' como ausente?')) return;
+          rpc('adminMarcarAusente', a.id).then(function() { tst('Marcado ausente', 'info'); fecharPainel(); renderPlanner(); }).catch(trataErro);
+        } else if (act === 'cancelar') {
+          if (!confirm('Cancelar agendamento de ' + a.publicador + '?')) return;
+          rpc('adminCancelar', a.id).then(function() { tst('Cancelado', 'info'); fecharPainel(); renderPlanner(); }).catch(trataErro);
+        }
+      });
+    });
   }
 
-  // ============== Painel: check-out ==============
-  function abrirPainelCheckout(agId, horarioId, dataYmd) {
+  function abrirPainelCheckout(agId) {
     var body = (
       '<form onsubmit="return false">' +
-        '<div class="field" style="margin-bottom:10px"><label>Estado das rodas</label>' +
+        '<div class="field" style="margin-bottom:12px"><label>Estado das rodas</label>' +
           '<select class="select" id="coRodas">' +
             '<option value="">—</option><option value="ok">OK</option><option value="atencao">Atenção</option><option value="problema">Problema</option>' +
           '</select></div>' +
-        '<div class="field" style="margin-bottom:10px"><label>Estado do display</label>' +
+        '<div class="field" style="margin-bottom:12px"><label>Estado do display</label>' +
           '<select class="select" id="coDisplay">' +
             '<option value="">—</option><option value="ok">OK</option><option value="atencao">Atenção</option><option value="problema">Problema</option>' +
           '</select></div>' +
-        '<div class="field" style="margin-bottom:10px"><label>Estoque de publicações restante</label>' +
+        '<div class="field" style="margin-bottom:12px"><label>Estoque de publicações restante</label>' +
           '<input class="input" type="number" id="coEstoque" min="0" max="9999" placeholder="Quantas sobraram"></div>' +
-        '<div class="field"><label>Notas de estado</label>' +
+        '<div class="field"><label>Notas</label>' +
           '<textarea class="textarea" id="coNotas" rows="3" maxlength="500"></textarea></div>' +
       '</form>'
     );
-    var foot = (
-      '<button class="btn" id="coCancelar">Voltar</button>' +
-      '<button class="btn btn-primary" id="coSalvar">Finalizar turno</button>'
-    );
+    var foot = '<button class="btn" id="coCancelar">Voltar</button>' +
+               '<button class="btn btn-primary" id="coSalvar">Finalizar turno</button>';
     abrirPainel('Check-out', body, foot);
-    $('#coCancelar').addEventListener('click', function() { abrirPainelSlot(horarioId, dataYmd); });
+    $('#coCancelar').addEventListener('click', function() { abrirPainelAgendamento(agId); });
     $('#coSalvar').addEventListener('click', function() {
       var est = {
         estadoRodas: $('#coRodas').value,
@@ -412,29 +489,29 @@
       };
       rpc('adminCheckOut', agId, est).then(function() {
         tst('Turno finalizado', 'success');
-        abrirPainelSlot(horarioId, dataYmd);
+        fecharPainel();
         renderPlanner();
       }).catch(trataErro);
     });
   }
 
-  // ============== PONTOS ==============
+  // ====== PONTOS ======
   function renderPontos() {
     var cont = $('#pontosLista');
     if (!state.pontos.length) {
-      cont.innerHTML = '<div class="empty">Nenhum ponto cadastrado. Clique em <b>Novo ponto</b> pra começar.</div>';
+      cont.innerHTML = '<div class="empty">Nenhum ponto cadastrado. Clique em <b>Novo ponto</b>.</div>';
       return;
     }
     var html = ['<div class="list">'];
     state.pontos.forEach(function(p) {
       html.push(
         '<div class="list-row' + (p.ativo ? '' : ' inativo') + '" data-id="' + esc(p.id) + '">' +
-          '<i class="bi bi-geo-alt" style="color:var(--accent)"></i>' +
-          '<div>' +
-            '<div class="primary">' + esc(p.nome) + (p.ativo ? '' : ' <span class="pill muted">inativo</span>') + '</div>' +
+          '<i class="bi bi-geo-alt ico-big"></i>' +
+          '<div style="flex:1">' +
+            '<div class="primary">' + esc(p.nome) + (p.ativo ? '' : ' <span class="pill bad">inativo</span>') + '</div>' +
             (p.endereco ? '<div class="secondary">' + esc(p.endereco) + '</div>' : '') +
           '</div>' +
-          '<div class="meta">' + (p.lat ? p.lat.toFixed(4) + ', ' + p.lng.toFixed(4) : 'sem coord') + '</div>' +
+          '<div class="meta">' + (p.lat ? p.lat.toFixed(4) + ', ' + p.lng.toFixed(4) : '—') + '</div>' +
         '</div>'
       );
     });
@@ -449,19 +526,19 @@
     var p = id ? pontoById(id) : null;
     var body = (
       '<form onsubmit="return false">' +
-        '<div class="field" style="margin-bottom:10px"><label>Nome *</label>' +
+        '<div class="field" style="margin-bottom:14px"><label>Nome *</label>' +
           '<input class="input" id="pNome" maxlength="120" value="' + esc(p ? p.nome : '') + '"></div>' +
-        '<div class="field" style="margin-bottom:10px"><label>Endereço</label>' +
+        '<div class="field" style="margin-bottom:14px"><label>Endereço</label>' +
           '<input class="input" id="pEndereco" maxlength="240" value="' + esc(p ? p.endereco : '') + '" placeholder="Opcional"></div>' +
-        '<div class="field" style="margin-bottom:8px">' +
+        '<div class="field" style="margin-bottom:14px">' +
           '<label>Localização * <span style="color:var(--muted);font-weight:400">— clique no mapa</span></label>' +
           '<div id="pMapa" class="mapa"></div>' +
-          '<div style="display:flex;gap:6px;margin-top:6px">' +
+          '<div style="display:flex;gap:8px;margin-top:8px">' +
             '<input class="input" id="pLat" type="number" step="0.000001" placeholder="Latitude" value="' + (p && p.lat ? p.lat : '') + '">' +
             '<input class="input" id="pLng" type="number" step="0.000001" placeholder="Longitude" value="' + (p && p.lng ? p.lng : '') + '">' +
           '</div>' +
         '</div>' +
-        '<div class="field" style="margin-bottom:10px"><label>Notas</label>' +
+        '<div class="field" style="margin-bottom:14px"><label>Notas</label>' +
           '<textarea class="textarea" id="pNotas" rows="2" maxlength="500">' + esc(p ? p.notas : '') + '</textarea></div>' +
         '<label class="check"><input type="checkbox" id="pAtivo"' + ((!p || p.ativo) ? ' checked' : '') + '> Ativo</label>' +
       '</form>'
@@ -472,8 +549,7 @@
       '<button class="btn btn-primary" id="pSalvar">Salvar</button>'
     );
     abrirPainel(p ? 'Editar ponto' : 'Novo ponto', body, foot);
-
-    setTimeout(montarMapaPonto, 220);
+    setTimeout(montarMapaPonto, 250);
     $('#pLat').addEventListener('change', sincMapaInputs);
     $('#pLng').addEventListener('change', sincMapaInputs);
     $('#pCancelar').addEventListener('click', fecharPainel);
@@ -485,12 +561,11 @@
     var lat = parseFloat($('#pLat').value);
     var lng = parseFloat($('#pLng').value);
     var centro = (isFinite(lat) && isFinite(lng)) ? [lat, lng] : [-15.78, -47.93];
-    var zoom = isFinite(lat) ? 16 : 5;
-    ui.mapa = L.map('pMapa').setView(centro, zoom);
+    ui.mapa = L.map('pMapa').setView(centro, isFinite(lat) ? 16 : 5);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(ui.mapa);
     if (isFinite(lat) && isFinite(lng)) colocarPin(lat, lng, false);
     ui.mapa.on('click', function(e) { colocarPin(e.latlng.lat, e.latlng.lng, true); });
-    setTimeout(function() { if (ui.mapa) ui.mapa.invalidateSize(); }, 50);
+    setTimeout(function() { if (ui.mapa) ui.mapa.invalidateSize(); }, 60);
   }
   function colocarPin(lat, lng, atualizaInputs) {
     if (atualizaInputs) {
@@ -515,7 +590,6 @@
       ui.mapa.setView([lat, lng], 16);
     }
   }
-
   function salvarPonto(id) {
     var payload = {
       id: id || '',
@@ -529,46 +603,36 @@
     if (!payload.nome) return tst('Nome é obrigatório', 'warn');
     if (!isFinite(payload.lat) || !isFinite(payload.lng)) return tst('Marque a localização no mapa', 'warn');
     var fn = payload.id ? 'atualizarPonto' : 'criarPonto';
-    rpc(fn, payload).then(function() {
-      tst('Ponto salvo', 'success');
-      fecharPainel();
-      carregarTudo();
-    }).catch(trataErro);
+    rpc(fn, payload).then(function() { tst('Ponto salvo', 'success'); fecharPainel(); carregarTudo(); }).catch(trataErro);
   }
   function excluirPonto(id) {
     if (!confirm('Desativar esse ponto?')) return;
-    rpc('excluirPonto', id).then(function() {
-      tst('Ponto desativado', 'info');
-      fecharPainel();
-      carregarTudo();
-    }).catch(trataErro);
+    rpc('excluirPonto', id).then(function() { tst('Ponto desativado', 'info'); fecharPainel(); carregarTudo(); }).catch(trataErro);
   }
 
-  // ============== HORÁRIOS ==============
+  // ====== HORÁRIOS (config) ======
   function renderHorarios() {
     var cont = $('#horariosLista');
     if (!state.horarios.length) {
-      cont.innerHTML = '<div class="empty">Nenhum horário cadastrado.</div>';
+      cont.innerHTML = '<div class="empty">Nenhum horário cadastrado. Clique em <b>Novo horário</b>.</div>';
       return;
     }
     var porPonto = {};
-    state.horarios.forEach(function(h) {
-      if (!porPonto[h.pontoId]) porPonto[h.pontoId] = [];
-      porPonto[h.pontoId].push(h);
-    });
+    state.horarios.forEach(function(h) { (porPonto[h.pontoId] = porPonto[h.pontoId] || []).push(h); });
     var html = [];
     state.pontos.forEach(function(p) {
       var hs = porPonto[p.id];
       if (!hs || !hs.length) return;
       hs.sort(function(a, b) { return a.diaSemana - b.diaSemana || a.horaInicio.localeCompare(b.horaInicio); });
-      html.push('<h4 style="margin:18px 0 8px;font-size:.95rem;color:var(--muted)">' + esc(p.nome) + '</h4>');
-      html.push('<div class="list">');
+      html.push('<h4 style="margin:18px 0 8px;font-size:.95rem;color:var(--muted)">' + esc(p.nome) + '</h4><div class="list">');
       hs.forEach(function(h) {
         html.push(
           '<div class="list-row' + (h.ativo ? '' : ' inativo') + '" data-h="' + esc(h.id) + '">' +
-            '<i class="bi bi-clock" style="color:var(--accent)"></i>' +
-            '<div><div class="primary">' + DIAS[h.diaSemana] + ' · ' + esc(h.horaInicio) + ' – ' + esc(h.horaFim) + '</div>' +
-            '<div class="secondary">Capacidade: ' + h.capacidade + (h.ativo ? '' : ' · inativo') + '</div></div>' +
+            '<i class="bi bi-clock ico-big"></i>' +
+            '<div style="flex:1">' +
+              '<div class="primary">' + DIAS[h.diaSemana] + ' · ' + esc(h.horaInicio) + ' – ' + esc(h.horaFim) + '</div>' +
+              '<div class="secondary">Capacidade ' + h.capacidade + (h.ativo ? '' : ' · inativo') + '</div>' +
+            '</div>' +
           '</div>'
         );
       });
@@ -582,28 +646,27 @@
 
   function abrirPainelHorario(id) {
     var h = id ? horarioById(id) : null;
-    var opcoesPontos = state.pontos
+    var pontosOpts = state.pontos
       .filter(function(p) { return p.ativo || (h && p.id === h.pontoId); })
       .map(function(p) {
         return '<option value="' + esc(p.id) + '"' + (h && h.pontoId === p.id ? ' selected' : '') + '>' + esc(p.nome) + '</option>';
       }).join('');
     var diaOpts = DIAS.map(function(n, i) {
-      var sel = (h ? h.diaSemana : 6) === i ? ' selected' : '';
-      return '<option value="' + i + '"' + sel + '>' + n + '</option>';
+      return '<option value="' + i + '"' + ((h ? h.diaSemana : 6) === i ? ' selected' : '') + '>' + n + '</option>';
     }).join('');
     var body = (
       '<form onsubmit="return false">' +
-        '<div class="field" style="margin-bottom:10px"><label>Ponto *</label>' +
-          '<select class="select" id="hPonto">' + opcoesPontos + '</select></div>' +
-        '<div class="field" style="margin-bottom:10px"><label>Dia da semana</label>' +
+        '<div class="field" style="margin-bottom:14px"><label>Ponto</label>' +
+          '<select class="select" id="hPonto">' + pontosOpts + '</select></div>' +
+        '<div class="field" style="margin-bottom:14px"><label>Dia da semana</label>' +
           '<select class="select" id="hDia">' + diaOpts + '</select></div>' +
-        '<div style="display:flex;gap:8px;margin-bottom:10px">' +
+        '<div style="display:flex;gap:10px;margin-bottom:14px">' +
           '<div class="field" style="flex:1"><label>Início</label>' +
             '<input class="input" type="time" id="hIni" value="' + (h ? h.horaInicio : '08:00') + '"></div>' +
           '<div class="field" style="flex:1"><label>Fim</label>' +
             '<input class="input" type="time" id="hFim" value="' + (h ? h.horaFim : '10:00') + '"></div>' +
         '</div>' +
-        '<div class="field" style="margin-bottom:10px"><label>Capacidade</label>' +
+        '<div class="field" style="margin-bottom:14px"><label>Capacidade (pessoas no slot)</label>' +
           '<input class="input" type="number" id="hCap" min="1" max="20" value="' + (h ? h.capacidade : 2) + '"></div>' +
         '<label class="check"><input type="checkbox" id="hAtivo"' + ((!h || h.ativo) ? ' checked' : '') + '> Ativo</label>' +
       '</form>'
@@ -618,9 +681,8 @@
     $('#hSalvar').addEventListener('click', function() { salvarHorario(h && h.id); });
     if (h) $('#hExcluir').addEventListener('click', function() { excluirHorario(h.id); });
   }
-
   function salvarHorario(id) {
-    var payload = {
+    var p = {
       id: id || '',
       pontoId: $('#hPonto').value,
       diaSemana: Number($('#hDia').value),
@@ -630,27 +692,19 @@
       ativo: $('#hAtivo').checked,
       recorrente: true
     };
-    var fn = payload.id ? 'atualizarHorario' : 'criarHorario';
-    rpc(fn, payload).then(function() {
-      tst('Horário salvo', 'success');
-      fecharPainel();
-      carregarTudo();
-    }).catch(trataErro);
+    var fn = p.id ? 'atualizarHorario' : 'criarHorario';
+    rpc(fn, p).then(function() { tst('Horário salvo', 'success'); fecharPainel(); carregarTudo(); }).catch(trataErro);
   }
   function excluirHorario(id) {
     if (!confirm('Desativar esse horário?')) return;
-    rpc('excluirHorario', id).then(function() {
-      tst('Horário desativado', 'info');
-      fecharPainel();
-      carregarTudo();
-    }).catch(trataErro);
+    rpc('excluirHorario', id).then(function() { tst('Horário desativado', 'info'); fecharPainel(); carregarTudo(); }).catch(trataErro);
   }
 
-  // ============== EQUIPAMENTOS ==============
+  // ====== EQUIPAMENTOS ======
   function renderEquipamentos() {
     var cont = $('#equipamentosLista');
     if (!state.equipamentos.length) {
-      cont.innerHTML = '<div class="empty">Nenhum equipamento cadastrado.</div>';
+      cont.innerHTML = '<div class="empty">Nenhum equipamento cadastrado. Clique em <b>Novo equipamento</b>.</div>';
       return;
     }
     var html = ['<div class="list">'];
@@ -659,15 +713,15 @@
       var ico = e.tipo === 'display' ? 'bi-tablet' : 'bi-cart3';
       html.push(
         '<div class="list-row' + (e.ativo ? '' : ' inativo') + '" data-eq="' + esc(e.id) + '">' +
-          '<i class="bi ' + ico + '" style="color:var(--accent)"></i>' +
-          '<div><div class="primary">' + esc(e.nome) +
-            ' <span class="pill muted">' + esc(e.tipo) + '</span>' +
-            (e.ativo ? '' : ' <span class="pill bad">inativo</span>') +
+          '<i class="bi ' + ico + ' ico-big"></i>' +
+          '<div style="flex:1">' +
+            '<div class="primary">' + esc(e.nome) + ' <span class="pill muted">' + esc(e.tipo) + '</span>' +
+              (e.ativo ? '' : ' <span class="pill bad">inativo</span>') + '</div>' +
+            '<div class="secondary">' +
+              (e.localGuardaPadrao ? '📦 ' + esc(e.localGuardaPadrao) : 'sem local padrão') +
+              (overrides.length ? ' · ' + overrides.length + ' override(s)' : '') +
+            '</div>' +
           '</div>' +
-          '<div class="secondary">' +
-            (e.localGuardaPadrao ? '📦 ' + esc(e.localGuardaPadrao) : 'sem local padrão') +
-            (overrides.length ? ' · ' + overrides.length + ' override(s)' : '') +
-          '</div></div>' +
         '</div>'
       );
     });
@@ -683,19 +737,16 @@
     var overrides = {};
     if (e) state.equipamentoLocais.filter(function(o) { return o.equipamentoId === e.id; })
       .forEach(function(o) { overrides[o.diaSemana] = o.localGuarda; });
-
-    var overridesHtml = [];
+    var ovs = [];
     for (var d = 0; d < 7; d++) {
-      overridesHtml.push(
-        '<div class="field" style="margin-bottom:6px">' +
-          '<label>' + DIAS[d] + '</label>' +
-          '<input class="input" data-ov="' + d + '" maxlength="240" placeholder="(usa padrão)" value="' + esc(overrides[d] || '') + '">' +
-        '</div>'
+      ovs.push(
+        '<div class="field" style="margin-bottom:8px"><label>' + DIAS[d] + '</label>' +
+          '<input class="input" data-ov="' + d + '" maxlength="240" placeholder="(usa o padrão)" value="' + esc(overrides[d] || '') + '"></div>'
       );
     }
     var body = (
       '<form onsubmit="return false">' +
-        '<div style="display:flex;gap:8px;margin-bottom:10px">' +
+        '<div style="display:flex;gap:10px;margin-bottom:14px">' +
           '<div class="field" style="flex:2"><label>Nome *</label>' +
             '<input class="input" id="eNome" maxlength="120" value="' + esc(e ? e.nome : '') + '"></div>' +
           '<div class="field" style="flex:1"><label>Tipo</label>' +
@@ -704,16 +755,16 @@
               '<option value="display"' + (e && e.tipo === 'display' ? ' selected' : '') + '>Display</option>' +
             '</select></div>' +
         '</div>' +
-        '<div class="field" style="margin-bottom:10px"><label>Local de guarda padrão</label>' +
+        '<div class="field" style="margin-bottom:14px"><label>Local padrão</label>' +
           '<input class="input" id="eLocal" maxlength="240" placeholder="Ex: Salão do Reino" value="' + esc(e ? e.localGuardaPadrao : '') + '"></div>' +
-        '<div class="field" style="margin-bottom:10px"><label>Notas</label>' +
+        '<div class="field" style="margin-bottom:14px"><label>Notas</label>' +
           '<textarea class="textarea" id="eNotas" rows="2" maxlength="500">' + esc(e ? e.notas : '') + '</textarea></div>' +
-        '<label class="check" style="margin-bottom:14px"><input type="checkbox" id="eAtivo"' + ((!e || e.ativo) ? ' checked' : '') + '> Ativo</label>' +
+        '<label class="check" style="margin-bottom:16px"><input type="checkbox" id="eAtivo"' + ((!e || e.ativo) ? ' checked' : '') + '> Ativo</label>' +
         '<hr>' +
-        '<div style="color:var(--muted);font-size:.85rem;margin-bottom:10px">' +
-          '<strong>Override de local por dia</strong> — deixe vazio pra usar o padrão.' +
+        '<div style="color:var(--muted);font-size:.86rem;margin-bottom:10px">' +
+          '<strong>Override por dia</strong> — vazio = usa padrão.' +
         '</div>' +
-        overridesHtml.join('') +
+        ovs.join('') +
       '</form>'
     );
     var foot = (
@@ -726,9 +777,8 @@
     $('#eSalvar').addEventListener('click', function() { salvarEquipamento(e && e.id); });
     if (e) $('#eExcluir').addEventListener('click', function() { excluirEquipamento(e.id); });
   }
-
   function salvarEquipamento(id) {
-    var payload = {
+    var p = {
       id: id || '',
       nome: $('#eNome').value.trim(),
       tipo: $('#eTipo').value,
@@ -736,143 +786,51 @@
       notas: $('#eNotas').value.trim(),
       ativo: $('#eAtivo').checked
     };
-    if (!payload.nome) return tst('Nome é obrigatório', 'warn');
-    var fn = payload.id ? 'atualizarEquipamento' : 'criarEquipamento';
-    rpc(fn, payload).then(function(r) {
-      var eqId = payload.id || (r && r.id);
-      var promises = [];
-      $$('[data-ov]').forEach(function(inp) {
-        promises.push(rpc('definirEquipamentoLocal', {
-          equipamentoId: eqId,
-          diaSemana: Number(inp.dataset.ov),
-          localGuarda: inp.value.trim()
-        }));
-      });
-      return Promise.all(promises);
-    }).then(function() {
-      tst('Equipamento salvo', 'success');
-      fecharPainel();
-      carregarTudo();
-    }).catch(trataErro);
+    if (!p.nome) return tst('Nome é obrigatório', 'warn');
+    var fn = p.id ? 'atualizarEquipamento' : 'criarEquipamento';
+    rpc(fn, p).then(function(r) {
+      var eqId = p.id || (r && r.id);
+      return Promise.all($$('[data-ov]').map(function(inp) {
+        return rpc('definirEquipamentoLocal', {
+          equipamentoId: eqId, diaSemana: Number(inp.dataset.ov), localGuarda: inp.value.trim()
+        });
+      }));
+    }).then(function() { tst('Equipamento salvo', 'success'); fecharPainel(); carregarTudo(); }).catch(trataErro);
   }
   function excluirEquipamento(id) {
     if (!confirm('Desativar esse equipamento?')) return;
-    rpc('excluirEquipamento', id).then(function() {
-      tst('Equipamento desativado', 'info');
-      fecharPainel();
-      carregarTudo();
-    }).catch(trataErro);
+    rpc('excluirEquipamento', id).then(function() { tst('Equipamento desativado', 'info'); fecharPainel(); carregarTudo(); }).catch(trataErro);
   }
 
-  // ============== FERIADOS ==============
-  function renderFeriados() {
-    var cont = $('#feriadosLista');
-    if (!state.feriados.length) {
-      cont.innerHTML = '<div class="empty">Nenhum feriado cadastrado.</div>';
-      return;
-    }
-    var pMap = {};
-    state.pontos.forEach(function(p) { pMap[p.id] = p.nome; });
-    var html = ['<div class="list">'];
-    state.feriados.slice().sort(function(a, b) { return a.data.localeCompare(b.data); }).forEach(function(f) {
-      html.push(
-        '<div class="list-row">' +
-          '<i class="bi bi-slash-circle" style="color:var(--warn)"></i>' +
-          '<div><div class="primary">' + esc(f.data) + ' · ' + esc(f.nome) + '</div>' +
-          '<div class="secondary">' + (f.pontoId ? esc(pMap[f.pontoId] || '?') : 'Todos os pontos') + '</div></div>' +
-          '<button class="btn btn-xs btn-danger" data-del-fer="' + esc(f.id) + '"><i class="bi bi-trash"></i></button>' +
-        '</div>'
-      );
-    });
-    html.push('</div>');
-    cont.innerHTML = html.join('');
-    $$('[data-del-fer]', cont).forEach(function(b) {
-      b.addEventListener('click', function(e) {
-        e.stopPropagation();
-        if (!confirm('Excluir feriado?')) return;
-        rpc('excluirFeriado', b.dataset.delFer).then(function() { tst('Feriado excluído', 'info'); carregarTudo(); }).catch(trataErro);
-      });
-    });
-  }
-
-  function abrirPainelFeriado() {
-    var pontoOpts = ['<option value="">Todos os pontos</option>'];
-    state.pontos.forEach(function(p) {
-      pontoOpts.push('<option value="' + esc(p.id) + '">' + esc(p.nome) + '</option>');
-    });
-    var body = (
-      '<form onsubmit="return false">' +
-        '<div class="field" style="margin-bottom:10px"><label>Data *</label>' +
-          '<input class="input" type="date" id="fData" value="' + ymdHoje() + '"></div>' +
-        '<div class="field" style="margin-bottom:10px"><label>Nome *</label>' +
-          '<input class="input" id="fNome" maxlength="120" placeholder="Ex: Natal"></div>' +
-        '<div class="field"><label>Ponto (vazio = todos)</label>' +
-          '<select class="select" id="fPonto">' + pontoOpts.join('') + '</select></div>' +
-      '</form>'
-    );
-    var foot = '<button class="btn" id="fCancelar">Cancelar</button>' +
-               '<button class="btn btn-primary" id="fSalvar">Salvar</button>';
-    abrirPainel('Novo feriado', body, foot);
-    $('#fCancelar').addEventListener('click', fecharPainel);
-    $('#fSalvar').addEventListener('click', salvarFeriado);
-  }
-
-  function salvarFeriado() {
-    var payload = {
-      data: $('#fData').value,
-      nome: $('#fNome').value.trim(),
-      pontoId: $('#fPonto').value
-    };
-    if (!payload.data || !payload.nome) return tst('Data e nome são obrigatórios', 'warn');
-    rpc('criarFeriado', payload).then(function() {
-      tst('Feriado salvo', 'success');
-      fecharPainel();
-      carregarTudo();
-    }).catch(trataErro);
-  }
-
-  // ============== CALENDÁRIO MENSAL ==============
+  // ====== CALENDÁRIO ======
   function mudarMes(delta) {
     var p = ui.mesAtual.split('-');
     var d = new Date(Number(p[0]), Number(p[1]) - 1 + delta, 1);
     ui.mesAtual = d.getFullYear() + '-' + pad(d.getMonth() + 1);
     renderCalendario();
   }
-
   function renderCalendario() {
     var p = ui.mesAtual.split('-');
     var ano = Number(p[0]), mes0 = Number(p[1]) - 1;
     $('#calTitulo').textContent = MESES[mes0] + ' / ' + ano;
-
     rpc('getAgendamentosDoMes', ui.mesAtual).then(function(ags) {
       desenharCalendario(ano, mes0, ags);
     }).catch(trataErro);
   }
-
   function desenharCalendario(ano, mes0, ags) {
     var html = DIAS_CURTOS.map(function(d) { return '<div class="cal-head">' + d + '</div>'; });
     var primeiro = new Date(ano, mes0, 1);
     var ult = new Date(ano, mes0 + 1, 0).getDate();
     var hoje = ymdHoje();
-
     var horsPorDia = [[], [], [], [], [], [], []];
     state.horarios.filter(function(h) { return h.ativo; }).forEach(function(h) { horsPorDia[h.diaSemana].push(h); });
-    var pMap = {};
-    state.pontos.forEach(function(p) { pMap[p.id] = p; });
-
+    var pMap = {}; state.pontos.forEach(function(p) { pMap[p.id] = p; });
     var ocup = {};
     ags.forEach(function(a) {
       if (a.status === 'cancelado') return;
       var k = a.data + '|' + a.horarioId;
       ocup[k] = (ocup[k] || 0) + 1;
     });
-
-    var ferG = {}, ferP = {};
-    state.feriados.forEach(function(f) {
-      if (!f.pontoId) ferG[f.data] = f.nome;
-      else (ferP[f.data] = ferP[f.data] || {})[f.pontoId] = true;
-    });
-
     var prevUlt = new Date(ano, mes0, 0).getDate();
     for (var i = primeiro.getDay() - 1; i >= 0; i--) {
       html.push('<div class="cal-cell outro"><div class="dia-num">' + (prevUlt - i) + '</div></div>');
@@ -882,25 +840,20 @@
       var dataYmd = ano + '-' + pad(mes0 + 1) + '-' + pad(dia);
       var classes = ['cal-cell'];
       if (dataYmd === hoje) classes.push('hoje');
-      if (ferG[dataYmd]) classes.push('feriado');
       var hors = horsPorDia[d.getDay()];
       var slots = hors.slice(0, 4).map(function(h) {
         var p = pMap[h.pontoId];
         if (!p || !p.ativo) return '';
-        if (ferP[dataYmd] && ferP[dataYmd][p.id]) return '';
         var n = ocup[dataYmd + '|' + h.id] || 0;
         var cls = n === 0 ? 'vazio' : (n > h.capacidade ? 'lotado' : (n >= h.capacidade ? 'cheio' : 'parcial'));
         return '<div class="cal-slot ' + cls + '" title="' + esc(p.nome) + ' ' + esc(h.horaInicio) + '">' +
-                 esc(h.horaInicio.substring(0,5)) + ' ' + esc(p.nome.substring(0,8)) +
-               '</div>';
+                 esc(h.horaInicio.substring(0,5)) + ' ' + esc(p.nome.substring(0,8)) + '</div>';
       }).filter(Boolean).join('');
       var extra = hors.length > 4 ? '<div style="color:var(--muted);font-size:.7rem">+' + (hors.length - 4) + '</div>' : '';
       html.push('<div class="' + classes.join(' ') + '"><div class="dia-num">' + dia + '</div>' + slots + extra + '</div>');
     }
     var resto = (7 - ((primeiro.getDay() + ult) % 7)) % 7;
-    for (var k = 1; k <= resto; k++) {
-      html.push('<div class="cal-cell outro"><div class="dia-num">' + k + '</div></div>');
-    }
+    for (var k = 1; k <= resto; k++) html.push('<div class="cal-cell outro"><div class="dia-num">' + k + '</div></div>');
     $('#calGrid').innerHTML = html.join('');
   }
 })();

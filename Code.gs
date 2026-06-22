@@ -733,6 +733,115 @@ function adminCancelar(id) {
   });
 }
 
+// Agenda direto pelo admin (sem PIN). Mantém race-check de capacidade
+// e conflito de equipamento — diferença é que aceita sem PIN.
+function adminAgendar(payload) {
+  return withLock_(function() {
+    var horarioId = String(payload && payload.horarioId || '');
+    var data = validarData_(String(payload.data || ''));
+    var publicador = sanitizar_(payload.publicador, 120);
+    if (!publicador) throw new Error('Nome do publicador é obrigatório.');
+    var equipamentoId = sanitizar_(payload.equipamentoId, 50);
+    var notas = sanitizar_(payload.notas, 500);
+
+    var horario = _horarioPorId_(horarioId);
+    if (!horario || !horario.ativo) throw new Error('Horário inválido.');
+    var d = _dataLocalMeioDia_(data);
+    if (d.getDay() !== horario.diaSemana) throw new Error('Data não bate com o dia da semana do horário.');
+
+    var sh = ensureSheetAgendamentos_();
+    var linhas = _todasLinhas_(sh);
+    var inscritos = _contarInscritos_(linhas, horarioId, data);
+    if (inscritos >= horario.capacidade) throw new Error('Slot lotado.');
+
+    var C = COL.AGENDAMENTOS;
+    for (var i = 0; i < linhas.length; i++) {
+      var r = linhas[i];
+      if (String(r[C.HORARIO_ID]) !== horarioId) continue;
+      if (formatarYmd_(r[C.DATA]) !== data) continue;
+      if (String(r[C.STATUS] || '') === STATUS.CANCELADO) continue;
+      if (String(r[C.PUBLICADOR] || '').toLowerCase() === publicador.toLowerCase()) {
+        throw new Error(publicador + ' já está nesse slot.');
+      }
+    }
+    if (equipamentoId && _equipamentoConflita_(linhas, equipamentoId, horarioId, data)) {
+      throw new Error('Esse carrinho/display já está reservado nesse intervalo.');
+    }
+
+    var id = gerarId_();
+    sh.appendRow([
+      id, horarioId, _dataLocalMeioDia_(data), publicador, '', // PIN vazio (admin)
+      '', equipamentoId, STATUS.AGENDADO,
+      '', '', '', '', '', '', notas, _ts_()
+    ]);
+    _invalidar();
+    return { id: id };
+  });
+}
+
+// Move agendamento existente pra outro slot (drag & drop). Mantém PIN
+// original e o publicador. Útil pra realocar quem já estava.
+function adminMoverAgendamento(payload) {
+  return withLock_(function() {
+    var id = String(payload && payload.id || '');
+    var sh = ensureSheetAgendamentos_();
+    var achado = _acharPorId_(sh, id);
+    if (!achado) throw new Error('Agendamento não encontrado.');
+    var novoHorarioId = String(payload.novoHorarioId || '');
+    var novaData = validarData_(String(payload.novaData || ''));
+    var horario = _horarioPorId_(novoHorarioId);
+    if (!horario || !horario.ativo) throw new Error('Destino inválido.');
+    var d = _dataLocalMeioDia_(novaData);
+    if (d.getDay() !== horario.diaSemana) throw new Error('Data não bate com o dia da semana do destino.');
+
+    var C = COL.AGENDAMENTOS;
+    var publicador = String(achado.valores[C.PUBLICADOR] || '');
+    var equipamentoId = String(achado.valores[C.EQUIPAMENTO_ID] || '');
+    var linhas = _todasLinhas_(sh).filter(function(r, idx) { return idx + 2 !== achado.row; }); // ignora a própria linha
+    var inscritos = _contarInscritos_(linhas, novoHorarioId, novaData);
+    if (inscritos >= horario.capacidade) throw new Error('Slot destino lotado.');
+    for (var i = 0; i < linhas.length; i++) {
+      var r = linhas[i];
+      if (String(r[C.HORARIO_ID]) !== novoHorarioId) continue;
+      if (formatarYmd_(r[C.DATA]) !== novaData) continue;
+      if (String(r[C.STATUS] || '') === STATUS.CANCELADO) continue;
+      if (String(r[C.PUBLICADOR] || '').toLowerCase() === publicador.toLowerCase()) {
+        throw new Error(publicador + ' já está no slot destino.');
+      }
+    }
+    if (equipamentoId && _equipamentoConflita_(linhas, equipamentoId, novoHorarioId, novaData)) {
+      // não bloqueia: limpa o equipamento na mudança
+      sh.getRange(achado.row, C.EQUIPAMENTO_ID_1IDX).setValue('');
+    }
+    sh.getRange(achado.row, C.HORARIO_ID_1IDX).setValue(novoHorarioId);
+    sh.getRange(achado.row, C.DATA_1IDX).setValue(_dataLocalMeioDia_(novaData));
+    _invalidar();
+    return { ok: true };
+  });
+}
+
+// Troca equipamento de um agendamento (admin via dropdown inline).
+function adminTrocarEquipamento(id, equipamentoId) {
+  return withLock_(function() {
+    var sh = ensureSheetAgendamentos_();
+    var achado = _acharPorId_(sh, id);
+    if (!achado) throw new Error('Agendamento não encontrado.');
+    var eqId = sanitizar_(equipamentoId, 50);
+    if (eqId) {
+      var C = COL.AGENDAMENTOS;
+      var data = formatarYmd_(achado.valores[C.DATA]);
+      var horarioId = String(achado.valores[C.HORARIO_ID]);
+      var linhas = _todasLinhas_(sh).filter(function(_, idx) { return idx + 2 !== achado.row; });
+      if (_equipamentoConflita_(linhas, eqId, horarioId, data)) {
+        throw new Error('Esse equipamento já está reservado em horário conflitante.');
+      }
+    }
+    sh.getRange(achado.row, COL.AGENDAMENTOS.EQUIPAMENTO_ID_1IDX).setValue(eqId);
+    _invalidar();
+    return { ok: true };
+  });
+}
+
 function adminMarcarAusente(id) {
   return withLock_(function() {
     var sh = ensureSheetAgendamentos_();

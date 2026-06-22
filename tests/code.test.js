@@ -295,6 +295,66 @@ test('getDadosAdmin retorna pacote completo', () => {
   assertTrue(d.urlPublico.indexOf('v=publico') !== -1);
 });
 
+test('adminAgendar cria sem PIN e mantém race-check de capacidade', () => {
+  const ctx = nova();
+  const p = ctx.criarPonto({ nome: 'P', lat: 0, lng: 0 });
+  const h = ctx.criarHorario({ pontoId: p.id, diaSemana: 6, horaInicio: '08:00', horaFim: '10:00', capacidade: 1 });
+  ctx.adminAgendar({ horarioId: h.id, data: '2026-06-20', publicador: 'João' });
+  let erro = false;
+  try { ctx.adminAgendar({ horarioId: h.id, data: '2026-06-20', publicador: 'Maria' }); }
+  catch (e) { erro = true; }
+  assertTrue(erro, 'segundo agendamento deveria estourar capacidade');
+});
+
+test('adminAgendar bloqueia mesmo nome duplicado no slot', () => {
+  const ctx = nova();
+  const p = ctx.criarPonto({ nome: 'P', lat: 0, lng: 0 });
+  const h = ctx.criarHorario({ pontoId: p.id, diaSemana: 6, horaInicio: '08:00', horaFim: '10:00', capacidade: 5 });
+  ctx.adminAgendar({ horarioId: h.id, data: '2026-06-20', publicador: 'João' });
+  let erro = false;
+  try { ctx.adminAgendar({ horarioId: h.id, data: '2026-06-20', publicador: 'joão' }); }
+  catch (e) { erro = true; }
+  assertTrue(erro);
+});
+
+test('adminMoverAgendamento muda slot e respeita capacidade do destino', () => {
+  const ctx = nova();
+  const p = ctx.criarPonto({ nome: 'P', lat: 0, lng: 0 });
+  const hA = ctx.criarHorario({ pontoId: p.id, diaSemana: 6, horaInicio: '08:00', horaFim: '10:00', capacidade: 2 });
+  const hB = ctx.criarHorario({ pontoId: p.id, diaSemana: 6, horaInicio: '14:00', horaFim: '16:00', capacidade: 1 });
+  const a = ctx.adminAgendar({ horarioId: hA.id, data: '2026-06-20', publicador: 'João' });
+  ctx.adminAgendar({ horarioId: hB.id, data: '2026-06-20', publicador: 'Maria' });
+  let erro = false;
+  try {
+    ctx.adminMoverAgendamento({ id: a.id, novoHorarioId: hB.id, novaData: '2026-06-20' });
+  } catch (e) { erro = true; }
+  assertTrue(erro, 'destino lotado, deveria falhar');
+
+  // mas mover pra outra data do mesmo horário (sábado) deve passar
+  ctx.adminMoverAgendamento({ id: a.id, novoHorarioId: hA.id, novaData: '2026-06-27' });
+  const ags = ctx.listarAgendamentos({});
+  const joao = ags.find(x => x.id === a.id);
+  assertEq(joao.data, '2026-06-27');
+});
+
+test('adminTrocarEquipamento troca/limpa e bloqueia conflito', () => {
+  const ctx = nova();
+  const p = ctx.criarPonto({ nome: 'P', lat: 0, lng: 0 });
+  const h = ctx.criarHorario({ pontoId: p.id, diaSemana: 6, horaInicio: '08:00', horaFim: '10:00', capacidade: 2 });
+  const e1 = ctx.criarEquipamento({ nome: 'C1', tipo: 'carrinho' });
+  const e2 = ctx.criarEquipamento({ nome: 'C2', tipo: 'carrinho' });
+  const a1 = ctx.adminAgendar({ horarioId: h.id, data: '2026-06-20', publicador: 'A', equipamentoId: e1.id });
+  const a2 = ctx.adminAgendar({ horarioId: h.id, data: '2026-06-20', publicador: 'B', equipamentoId: e2.id });
+  // troca de A pra C2: conflita com B → erro
+  let erro = false;
+  try { ctx.adminTrocarEquipamento(a1.id, e2.id); } catch (e) { erro = true; }
+  assertTrue(erro);
+  // limpa equipamento de A: passa
+  ctx.adminTrocarEquipamento(a1.id, '');
+  const ag = ctx.listarAgendamentos({}).find(x => x.id === a1.id);
+  assertEq(ag.equipamentoId, '');
+});
+
 test('getAgendamentosDoMes filtra por yyyy-MM e rejeita formato errado', () => {
   const ctx = nova();
   const p = ctx.criarPonto({ nome: 'P', lat: 0, lng: 0 });
