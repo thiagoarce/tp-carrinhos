@@ -38,6 +38,23 @@ test('CRUD Equipamento com cor; soft-delete; definitivo apaga overrides', () => 
   assertEq(ctx.listarEquipamentoLocais().length, 0);
 });
 
+test('criarPublicadoresLote pula duplicados e aceita {nome, telefone}', () => {
+  const ctx = nova();
+  ctx.criarPublicador({ nome: 'João Existente' });
+  const r = ctx.criarPublicadoresLote([
+    'Maria Nova',
+    { nome: 'Pedro Costa', telefone: '83999' },
+    'joão existente', // dup normalizada
+    '',               // vazio
+    'Maria Nova'      // dup interna
+  ]);
+  assertEq(r.criados.length, 2);
+  assertEq(r.pulados.length, 2); // 'joão existente' + 'Maria Nova' interno
+  assertEq(r.invalidos.length, 1);
+  const todos = ctx.listarPublicadores(false).map(p => p.nome).sort();
+  assertEq(todos, ['João Existente', 'Maria Nova', 'Pedro Costa']);
+});
+
 test('CRUD Publicador + duplicado bloqueado', () => {
   const ctx = nova();
   ctx.criarPublicador({ nome: 'João Silva' });

@@ -91,6 +91,7 @@
     $('#btnNovoEventoSemEq').addEventListener('click', function() { abrirPainelEvento(null, { equipamentoId: ui.equipamentoId }); });
     $('#btnNovoEventoGeral').addEventListener('click', function() { abrirPainelEvento(null, {}); });
     $('#btnNovoPublicador').addEventListener('click', function() { abrirPainelPublicador(null); });
+    $('#btnLotePublicador').addEventListener('click', abrirPainelLotePublicadores);
     $('#btnNovoPonto').addEventListener('click', function() { abrirPainelPonto(null); });
     $('#btnNovoEquipamento').addEventListener('click', function() { abrirPainelEquipamento(null); });
 
@@ -612,6 +613,79 @@
       r.addEventListener('click', function() { abrirPainelPublicador(r.dataset.pub); });
     });
   }
+  function abrirPainelLotePublicadores() {
+    var body = (
+      '<div style="color:var(--muted);font-size:.88rem;margin-bottom:10px">' +
+        'Cole a lista de publicadores. <b>Um por linha.</b> Aceita formato:' +
+        '<br>• <code>Nome completo</code>' +
+        '<br>• <code>Nome | telefone</code> (separado por <code>|</code> ou <code>;</code>)' +
+        '<br>Duplicados são pulados automaticamente.' +
+      '</div>' +
+      '<div class="field"><label>Lista</label>' +
+        '<textarea class="textarea" id="lotTxt" rows="14" placeholder="João da Silva\nMaria Santos | 83999998888\nPedro Oliveira"></textarea>' +
+      '</div>' +
+      '<div id="lotPreview" style="margin-top:10px"></div>'
+    );
+    var foot = (
+      '<button class="btn" id="lotCancelar">Cancelar</button>' +
+      '<button class="btn btn-primary" id="lotSalvar">Adicionar todos</button>'
+    );
+    abrirPainel('Adicionar publicadores em lote', body, foot);
+    $('#lotCancelar').addEventListener('click', fecharPainel);
+    $('#lotTxt').addEventListener('input', atualizarPreviewLote);
+    $('#lotSalvar').addEventListener('click', salvarLotePublicadores);
+  }
+
+  function _parseLoteTexto_(txt) {
+    var existentes = {};
+    state.publicadores.forEach(function(p) {
+      existentes[p.nome.trim().toLowerCase().replace(/\s+/g, ' ')] = true;
+    });
+    var linhas = String(txt || '').split(/\r?\n/);
+    var novos = [], dup = [], vazios = 0;
+    var jaVistos = {};
+    linhas.forEach(function(l) {
+      var t = l.trim();
+      if (!t) { vazios++; return; }
+      var partes = t.split(/\s*[|;]\s*/);
+      var nome = (partes[0] || '').trim();
+      var tel = (partes[1] || '').trim();
+      if (!nome) { vazios++; return; }
+      var key = nome.toLowerCase().replace(/\s+/g, ' ');
+      if (existentes[key] || jaVistos[key]) { dup.push(nome); return; }
+      jaVistos[key] = true;
+      novos.push({ nome: nome, telefone: tel });
+    });
+    return { novos: novos, dup: dup };
+  }
+
+  function atualizarPreviewLote() {
+    var r = _parseLoteTexto_($('#lotTxt').value);
+    var msg = '<div class="pill ' + (r.novos.length ? 'accent' : 'muted') + '">' + r.novos.length + ' novo(s)</div>';
+    if (r.dup.length) msg += ' <div class="pill warn">' + r.dup.length + ' já existem (serão pulados)</div>';
+    $('#lotPreview').innerHTML = msg;
+  }
+
+  function salvarLotePublicadores() {
+    var r = _parseLoteTexto_($('#lotTxt').value);
+    if (!r.novos.length) {
+      tst(r.dup.length ? 'Todos já estavam cadastrados' : 'Cole pelo menos um nome', 'warn');
+      return;
+    }
+    var btn = $('#lotSalvar');
+    btn.disabled = true; btn.textContent = 'Salvando ' + r.novos.length + '...';
+    rpc('criarPublicadoresLote', r.novos).then(function(res) {
+      var msg = res.criados.length + ' adicionado(s)';
+      if (res.pulados.length) msg += ', ' + res.pulados.length + ' pulado(s)';
+      tst(msg, 'success', 4000);
+      fecharPainel();
+      carregarTudo();
+    }).catch(function(err) {
+      btn.disabled = false; btn.textContent = 'Adicionar todos';
+      trataErro(err);
+    });
+  }
+
   function abrirPainelPublicador(id) {
     var p = id ? publicadorById(id) : null;
     var body = (
@@ -709,10 +783,14 @@
       rpc('excluirPontoDefinitivo', p.id).then(function() { tst('Excluído', 'info'); fecharPainel(); carregarTudo(); }).catch(trataErro);
     });
   }
+  // Padrão: Jardim Oceania, João Pessoa - PB
+  var CENTRO_PADRAO = [-7.106, -34.832];
+  var ZOOM_PADRAO   = 14;
   function montarMapaPonto() {
     var lat = parseFloat($('#pLat').value), lng = parseFloat($('#pLng').value);
-    var centro = (isFinite(lat) && isFinite(lng)) ? [lat, lng] : [-15.78, -47.93];
-    ui.mapa = L.map('pMapa').setView(centro, isFinite(lat) ? 16 : 5);
+    var centro = (isFinite(lat) && isFinite(lng)) ? [lat, lng] : CENTRO_PADRAO;
+    var zoom = isFinite(lat) ? 16 : ZOOM_PADRAO;
+    ui.mapa = L.map('pMapa').setView(centro, zoom);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(ui.mapa);
     if (isFinite(lat) && isFinite(lng)) colocarPin(lat, lng, false);
     ui.mapa.on('click', function(e) { colocarPin(e.latlng.lat, e.latlng.lng, true); });

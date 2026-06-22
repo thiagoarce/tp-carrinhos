@@ -156,6 +156,39 @@ function criarPublicador(payload) {
   });
 }
 
+// Cria N publicadores de uma vez. Recebe array de nomes (ou objetos
+// {nome, telefone}). Pula duplicados silenciosamente; retorna o resumo.
+function criarPublicadoresLote(itens) {
+  return withLock_(function() {
+    if (!Array.isArray(itens)) throw new Error('Lista inválida.');
+    var sh = ensureSheetPublicadores_();
+    // Coleta nomes existentes uma vez (normalizado)
+    var existentes = {};
+    listarPublicadores(false).forEach(function(p) { existentes[_normNome_(p.nome)] = true; });
+    var criados = [], pulados = [], invalidos = [];
+    var ts = _ts_();
+    var lote = []; // pra appendRows em batch
+    itens.forEach(function(item) {
+      var nome = '', telefone = '';
+      if (typeof item === 'string') { nome = item; }
+      else if (item && typeof item === 'object') { nome = item.nome; telefone = item.telefone || ''; }
+      nome = sanitizar_(nome, 120);
+      if (!nome) { invalidos.push(String(item)); return; }
+      var key = _normNome_(nome);
+      if (existentes[key]) { pulados.push(nome); return; }
+      existentes[key] = true;
+      lote.push([gerarId_(), nome, sanitizar_(telefone, 30), true, '', ts]);
+      criados.push(nome);
+    });
+    if (lote.length) {
+      var startRow = sh.getLastRow() + 1;
+      sh.getRange(startRow, 1, lote.length, COL.PUBLICADORES.HEADER.length).setValues(lote);
+    }
+    _invalidar();
+    return { criados: criados, pulados: pulados, invalidos: invalidos };
+  });
+}
+
 function atualizarPublicador(payload) {
   return withLock_(function() {
     var sh = ensureSheetPublicadores_();

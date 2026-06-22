@@ -96,7 +96,10 @@
     <section data-page="publicadores" hidden>
       <div class="page-head">
         <div><h2>Publicadores</h2><div class="subtitle">Brothers aprovados a agendar</div></div>
-        <button class="btn btn-primary" id="btnNovoPublicador"><i class="bi bi-plus-lg"></i> Novo publicador</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" id="btnLotePublicador"><i class="bi bi-card-list"></i> Adicionar em lote</button>
+          <button class="btn btn-primary" id="btnNovoPublicador"><i class="bi bi-plus-lg"></i> Novo</button>
+        </div>
       </div>
       <div id="publicadoresLista"></div>
     </section>
