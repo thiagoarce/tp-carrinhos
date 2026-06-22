@@ -22,12 +22,12 @@
     <div class="brand"><span class="dot"></span> TP-Carrinhos</div>
 
     <div class="nav-group">
-      <div class="nav-label">Operação</div>
+      <div class="nav-label">Agenda</div>
       <div class="nav-item active" data-view="planner">
-        <span class="ico"><i class="bi bi-calendar3-week"></i></span> Planner semanal
+        <span class="ico"><i class="bi bi-calendar-week"></i></span> Por equipamento
       </div>
-      <div class="nav-item" data-view="calendario">
-        <span class="ico"><i class="bi bi-calendar-month"></i></span> Visão mensal
+      <div class="nav-item" data-view="geral">
+        <span class="ico"><i class="bi bi-calendar3"></i></span> Visão geral
       </div>
     </div>
 
@@ -45,9 +45,6 @@
     </div>
 
     <div class="sidebar-footer">
-      <button class="btn btn-ghost btn-sm" id="btnConfHorarios" type="button">
-        <i class="bi bi-clock"></i> Horários recorrentes
-      </button>
       <button class="btn btn-ghost btn-sm" id="btnLinkPublico" type="button">
         <i class="bi bi-link-45deg"></i> Link publicador
       </button>
@@ -63,34 +60,42 @@
     <section data-page="planner">
       <div class="page-head">
         <div>
-          <h2>Planner semanal</h2>
-          <div class="subtitle" id="plannerSub">Adicione irmãos clicando no slot, arraste pra mover</div>
+          <h2>Agenda por equipamento</h2>
+          <div class="subtitle">Clique numa célula vazia pra criar um evento</div>
         </div>
-        <div class="planner-head">
-          <button class="btn btn-icon" id="weekPrev" aria-label="Semana anterior"><i class="bi bi-chevron-left"></i></button>
-          <button class="btn btn-sm" id="weekToday">Hoje</button>
-          <span class="range" id="weekRange"></span>
-          <button class="btn btn-icon" id="weekNext" aria-label="Próxima semana"><i class="bi bi-chevron-right"></i></button>
-        </div>
+        <button class="btn btn-primary" id="btnNovoEventoSemEq"><i class="bi bi-plus-lg"></i> Novo evento</button>
       </div>
-      <div class="planner" id="plannerGrid"></div>
+      <div class="planner-toolbar">
+        <select class="select seletor" id="selEq"></select>
+        <button class="btn btn-icon" id="weekPrev" aria-label="Anterior"><i class="bi bi-chevron-left"></i></button>
+        <button class="btn btn-sm" id="weekToday">Hoje</button>
+        <span class="range" id="weekRange"></span>
+        <button class="btn btn-icon" id="weekNext" aria-label="Próximo"><i class="bi bi-chevron-right"></i></button>
+      </div>
+      <div id="agendaEq"></div>
     </section>
 
-    <section data-page="calendario" hidden>
+    <section data-page="geral" hidden>
       <div class="page-head">
-        <h2>Visão mensal</h2>
-        <div class="planner-head">
-          <button class="btn btn-icon" id="calPrev" aria-label="Mês anterior"><i class="bi bi-chevron-left"></i></button>
-          <span class="range" id="calTitulo"></span>
-          <button class="btn btn-icon" id="calNext" aria-label="Próximo mês"><i class="bi bi-chevron-right"></i></button>
+        <div>
+          <h2>Visão geral</h2>
+          <div class="subtitle">Todos os equipamentos sobrepostos, cor por equipamento</div>
         </div>
+        <button class="btn btn-primary" id="btnNovoEventoGeral"><i class="bi bi-plus-lg"></i> Novo evento</button>
       </div>
-      <div id="calGrid" class="cal-grid"></div>
+      <div class="planner-toolbar">
+        <button class="btn btn-icon" id="weekPrevGeral" aria-label="Anterior"><i class="bi bi-chevron-left"></i></button>
+        <button class="btn btn-sm" id="weekTodayGeral">Hoje</button>
+        <span class="range" id="weekRangeGeral"></span>
+        <button class="btn btn-icon" id="weekNextGeral" aria-label="Próximo"><i class="bi bi-chevron-right"></i></button>
+      </div>
+      <div id="agendaGeral"></div>
+      <div class="legenda" id="legendaEq"></div>
     </section>
 
     <section data-page="publicadores" hidden>
       <div class="page-head">
-        <div><h2>Publicadores</h2><div class="subtitle">Brothers aprovados a agendar TP</div></div>
+        <div><h2>Publicadores</h2><div class="subtitle">Brothers aprovados a agendar</div></div>
         <button class="btn btn-primary" id="btnNovoPublicador"><i class="bi bi-plus-lg"></i> Novo publicador</button>
       </div>
       <div id="publicadoresLista"></div>
@@ -98,7 +103,7 @@
 
     <section data-page="pontos" hidden>
       <div class="page-head">
-        <div><h2>Pontos de TP</h2><div class="subtitle">Locais fixos onde os carrinhos ficam</div></div>
+        <div><h2>Pontos</h2><div class="subtitle">Locais fixos com mapa</div></div>
         <button class="btn btn-primary" id="btnNovoPonto"><i class="bi bi-plus-lg"></i> Novo ponto</button>
       </div>
       <div id="pontosLista"></div>
@@ -106,18 +111,10 @@
 
     <section data-page="equipamentos" hidden>
       <div class="page-head">
-        <div><h2>Carrinhos e Displays</h2><div class="subtitle">Equipamentos da congregação</div></div>
+        <div><h2>Equipamentos</h2><div class="subtitle">Carrinhos e displays</div></div>
         <button class="btn btn-primary" id="btnNovoEquipamento"><i class="bi bi-plus-lg"></i> Novo equipamento</button>
       </div>
       <div id="equipamentosLista"></div>
-    </section>
-
-    <section data-page="horarios" hidden>
-      <div class="page-head">
-        <div><h2>Horários recorrentes</h2><div class="subtitle">Mexe pouco — define o esqueleto da semana</div></div>
-        <button class="btn btn-primary" id="btnNovoHorario"><i class="bi bi-plus-lg"></i> Novo horário</button>
-      </div>
-      <div id="horariosLista"></div>
     </section>
 
   </main>
@@ -136,7 +133,6 @@
 <?!= include('JS_ToastPublico') ?>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
-<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js" defer></script>
 <script>
   var URL_PUBLICO = "<?= urlPublico ?>";
   var URL_ADMIN   = "<?= urlAdmin ?>";

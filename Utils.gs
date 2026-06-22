@@ -97,13 +97,10 @@ function escapeHtml_(s) {
 // antigas viram cache miss naturalmente.
 var _NS = {
   PONTOS:        'p',
-  HORARIOS:      'h',
   EQUIPAMENTOS:  'e',
   EQ_LOCAIS:     'el',
   PUBLICADORES:  'pb',
-  AGENDAMENTOS:  'a',
-  FERIADOS:      'f',
-  PUBLICO:       'pub'
+  EVENTOS:       'ev'
 };
 
 function _verNS_(ns) {
