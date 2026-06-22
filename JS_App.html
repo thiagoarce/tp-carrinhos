@@ -10,7 +10,8 @@
     view: 'planner',
     semanaInicio: inicioDaSemana(new Date()),
     equipamentoId: null,
-    eventos: [],
+    eventos: [],            // eventos visíveis na semana atual (filtrados)
+    janelaCache: null,      // { chave, eventos } — cache de janela
     mapa: null, marcador: null
   };
 
@@ -110,6 +111,7 @@
   }
 
   function carregarTudo() {
+    invalidarJanelaCache();
     return rpc('getDadosAdmin').then(function(d) {
       state.pontos = d.pontos || [];
       state.equipamentos = d.equipamentos || [];
@@ -197,7 +199,8 @@
     }
     var ini = ymd(ui.semanaInicio);
     var fim = ymd(adicionarDias(ui.semanaInicio, 6));
-    rpc('listarEventos', { equipamentoId: ui.equipamentoId, inicio: ini, fim: fim }).then(function(evs) {
+    obterEventosDaJanela(ini, fim).then(function(todos) {
+      var evs = todos.filter(function(e) { return e.equipamentoId === ui.equipamentoId; });
       ui.eventos = evs;
       desenharAgenda($('#agendaEq'), evs, /*colorPorEquipamento=*/false);
     }).catch(trataErro);
@@ -207,11 +210,39 @@
     renderRangeLabel();
     var ini = ymd(ui.semanaInicio);
     var fim = ymd(adicionarDias(ui.semanaInicio, 6));
-    rpc('listarEventos', { inicio: ini, fim: fim }).then(function(evs) {
+    obterEventosDaJanela(ini, fim).then(function(evs) {
       ui.eventos = evs;
       desenharAgenda($('#agendaGeral'), evs, /*colorPorEquipamento=*/true);
       renderLegenda();
     }).catch(trataErro);
+  }
+
+  // Cache de janela: 1 chamada do backend serve pra qualquer equipamento
+  // dentro da mesma semana. Trocar equipamento = filtro local instantâneo.
+  function obterEventosDaJanela(ini, fim) {
+    var chave = ini + '|' + fim;
+    if (ui.janelaCache && ui.janelaCache.chave === chave) {
+      return Promise.resolve(ui.janelaCache.eventos);
+    }
+    mostrarLoadingAgenda();
+    return rpc('listarEventos', { inicio: ini, fim: fim }).then(function(evs) {
+      ui.janelaCache = { chave: chave, eventos: evs };
+      return evs;
+    });
+  }
+
+  function invalidarJanelaCache() { ui.janelaCache = null; }
+
+  function recarregarAgenda() {
+    invalidarJanelaCache();
+    atualizarVisaoAtual();
+  }
+
+  function mostrarLoadingAgenda() {
+    var alvo = ui.view === 'planner' ? $('#agendaEq') : $('#agendaGeral');
+    if (alvo && !alvo.querySelector('.agenda')) {
+      alvo.innerHTML = '<div class="empty"><i class="bi bi-arrow-clockwise" style="animation:spin 1s linear infinite;display:inline-block"></i> Carregando...</div>';
+    }
   }
 
   function renderLegenda() {
@@ -313,10 +344,20 @@
   function instalarInteracoesAgenda(container) {
     var body = container.querySelector('.agenda-body');
     if (!body) return;
+    // Suprime menu de contexto/seleção do iOS na agenda
+    body.addEventListener('contextmenu', function(e) { e.preventDefault(); });
+    body.addEventListener('selectstart', function(e) { e.preventDefault(); });
+    // Bloqueia gesto nativo de "touch hold = select" no iOS
+    body.addEventListener('touchstart', function(e) {
+      var col = e.target.closest && e.target.closest('.col-dia');
+      if (col) e.preventDefault();
+    }, { passive: false });
     body.addEventListener('pointerdown', function(e) {
       if (e.button !== undefined && e.button !== 0) return;
       var col = e.target.closest && e.target.closest('.col-dia');
       if (!col) return;
+      e.preventDefault();
+      e.stopPropagation();
 
       var card  = e.target.closest('.evento');
       var resz  = e.target.dataset && e.target.dataset.resize === '1';
@@ -326,7 +367,6 @@
         if (!evo) return;
         if (evo.status === 'cancelado' || evo.status === 'concluido') return;
       }
-      e.preventDefault();
       iniciarPointerOp(e, modo, col, card);
     });
   }
@@ -437,12 +477,15 @@
       if (card) card.style.opacity = '';
     }
 
-    function onUp(ev2) {
+    function desligar() {
       try { body.releasePointerCapture(pointerId); } catch (er) {}
-      body.removeEventListener('pointermove', onMove);
-      body.removeEventListener('pointerup', onUp);
-      body.removeEventListener('pointercancel', onUp);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    }
 
+    function onUp(ev2) {
+      desligar();
       if (!moved) {
         limpar();
         // click curto
@@ -491,23 +534,24 @@
           return;
         }
         rpc('atualizarEvento', ev.id, { data: novaData, horaInicio: novaHi, horaFim: novaHf })
-          .then(function() { tst('Movido pra ' + novaData + ' ' + novaHi, 'success', 1800); atualizarVisaoAtual(); })
-          .catch(function(err) { trataErro(err); atualizarVisaoAtual(); });
+          .then(function() { tst('Movido pra ' + novaData + ' ' + novaHi, 'success', 1800); recarregarAgenda(); })
+          .catch(function(err) { trataErro(err); recarregarAgenda(); });
       }
       else if (modo === 'resize') {
         var p2 = ghost._payload || {};
         limpar();
         if (p2.hf === ev.horaFim.substring(0,5)) { atualizarVisaoAtual(); return; }
         rpc('atualizarEvento', ev.id, { horaFim: p2.hf })
-          .then(function() { tst('Duração ajustada', 'success', 1600); atualizarVisaoAtual(); })
-          .catch(function(err) { trataErro(err); atualizarVisaoAtual(); });
+          .then(function() { tst('Duração ajustada', 'success', 1600); recarregarAgenda(); })
+          .catch(function(err) { trataErro(err); recarregarAgenda(); });
       }
     }
 
     try { body.setPointerCapture(pointerId); } catch (er) {}
-    body.addEventListener('pointermove', onMove);
-    body.addEventListener('pointerup', onUp);
-    body.addEventListener('pointercancel', onUp);
+    // Listeners no window cobrem o caso de o pointer sair da agenda no mobile
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
   }
 
   // Atribui colunas pra evitar overlap visual.
@@ -684,7 +728,7 @@
         rpc('removerPublicadorDoEvento', ev.id, idPub).then(function() {
           tst('Removido', 'info', 1500);
           fecharPainel();
-          atualizarVisaoAtual();
+          recarregarAgenda();
         }).catch(trataErro);
       });
     });

@@ -505,6 +505,10 @@ function _linhaParaEvento_(r) {
 
 function listarEventos(filtro) {
   filtro = filtro || {};
+  var cacheKey = (filtro.equipamentoId || '_') + '|' + (filtro.inicio || '_') + '|' +
+                 (filtro.fim || '_') + '|' + (filtro.incluirCancelados ? 'c' : 'a');
+  var cached = _cacheGet_(_NS.EVENTOS, cacheKey);
+  if (cached) return cached;
   var sh = ensureSheetEventos_();
   var out = _todasLinhas_(sh).map(_linhaParaEvento_);
   if (filtro.equipamentoId) {
@@ -522,6 +526,7 @@ function listarEventos(filtro) {
   out.sort(function(a, b) {
     return a.data.localeCompare(b.data) || a.horaInicio.localeCompare(b.horaInicio);
   });
+  _cachePut_(_NS.EVENTOS, cacheKey, out, 300);
   return out;
 }
 
