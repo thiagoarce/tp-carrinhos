@@ -260,8 +260,50 @@ test('initSchema_ é idempotente: roda 2x sem duplicar abas', () => {
 
 test('doGet roteia admin vs publico sem lançar', () => {
   const ctx = nova();
-  // sem parâmetro → admin
   ctx.doGet({});
   ctx.doGet({ parameter: { v: 'publico' } });
   ctx.doGet({ parameter: { v: 'admin' } });
+});
+
+test('adminCancelar/Ausente/CheckIn/CheckOut funcionam sem PIN', () => {
+  const ctx = nova();
+  const p = ctx.criarPonto({ nome: 'P', lat: 0, lng: 0 });
+  const h = ctx.criarHorario({ pontoId: p.id, diaSemana: 6, horaInicio: '08:00', horaFim: '10:00', capacidade: 2 });
+  const a1 = ctx.agendar({ horarioId: h.id, data: '2026-06-20', publicador: 'A', pin: '1111' });
+  const a2 = ctx.agendar({ horarioId: h.id, data: '2026-06-20', publicador: 'B', pin: '2222' });
+  ctx.adminCheckIn(a1.id);
+  ctx.adminCheckOut(a1.id, { estadoRodas: 'ok', estoquePubs: 5 });
+  ctx.adminMarcarAusente(a2.id);
+  const ags = ctx.listarAgendamentos({ data: '2026-06-20' });
+  const byId = {};
+  ags.forEach(a => byId[a.id] = a);
+  assertEq(byId[a1.id].status, 'concluido');
+  assertEq(byId[a1.id].estoquePubs, 5);
+  assertEq(byId[a2.id].status, 'ausente');
+});
+
+test('getDadosAdmin retorna pacote completo', () => {
+  const ctx = nova();
+  ctx.criarPonto({ nome: 'P', lat: 0, lng: 0 });
+  ctx.criarEquipamento({ nome: 'C1', tipo: 'carrinho' });
+  const d = ctx.getDadosAdmin();
+  assertEq(d.pontos.length, 1);
+  assertEq(d.equipamentos.length, 1);
+  assertTrue('horarios' in d);
+  assertTrue('feriados' in d);
+  assertTrue('equipamentoLocais' in d);
+  assertTrue(d.urlPublico.indexOf('v=publico') !== -1);
+});
+
+test('getAgendamentosDoMes filtra por yyyy-MM e rejeita formato errado', () => {
+  const ctx = nova();
+  const p = ctx.criarPonto({ nome: 'P', lat: 0, lng: 0 });
+  const h = ctx.criarHorario({ pontoId: p.id, diaSemana: 6, horaInicio: '08:00', horaFim: '10:00', capacidade: 2 });
+  ctx.agendar({ horarioId: h.id, data: '2026-06-20', publicador: 'A', pin: '1111' });
+  ctx.agendar({ horarioId: h.id, data: '2026-07-04', publicador: 'B', pin: '2222' });
+  assertEq(ctx.getAgendamentosDoMes('2026-06').length, 1);
+  assertEq(ctx.getAgendamentosDoMes('2026-07').length, 1);
+  let erro = false;
+  try { ctx.getAgendamentosDoMes('2026/06'); } catch (e) { erro = true; }
+  assertTrue(erro);
 });

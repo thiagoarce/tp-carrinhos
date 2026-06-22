@@ -718,6 +718,92 @@ function getDadosPublico(data) {
   return out;
 }
 
+// ===================== Funções admin (sem PIN) ========================
+// Segurança aqui = obscuridade da URL ?v=admin. Não tem auth real do GAS
+// com USER_DEPLOYING + ANYONE_ANONYMOUS. Use só o link admin com cuidado.
+
+function adminCancelar(id) {
+  return withLock_(function() {
+    var sh = ensureSheetAgendamentos_();
+    var achado = _acharPorId_(sh, id);
+    if (!achado) throw new Error('Agendamento não encontrado.');
+    sh.getRange(achado.row, COL.AGENDAMENTOS.STATUS_1IDX).setValue(STATUS.CANCELADO);
+    _invalidar();
+    return { ok: true };
+  });
+}
+
+function adminMarcarAusente(id) {
+  return withLock_(function() {
+    var sh = ensureSheetAgendamentos_();
+    var achado = _acharPorId_(sh, id);
+    if (!achado) throw new Error('Agendamento não encontrado.');
+    sh.getRange(achado.row, COL.AGENDAMENTOS.STATUS_1IDX).setValue(STATUS.AUSENTE);
+    _invalidar();
+    return { ok: true };
+  });
+}
+
+function adminCheckIn(id) {
+  return withLock_(function() {
+    var sh = ensureSheetAgendamentos_();
+    var achado = _acharPorId_(sh, id);
+    if (!achado) throw new Error('Agendamento não encontrado.');
+    sh.getRange(achado.row, COL.AGENDAMENTOS.STATUS_1IDX).setValue(STATUS.PRESENTE);
+    sh.getRange(achado.row, COL.AGENDAMENTOS.CHECKIN_1IDX).setValue(_ts_());
+    _invalidar();
+    return { ok: true };
+  });
+}
+
+function adminCheckOut(id, estado) {
+  return withLock_(function() {
+    var sh = ensureSheetAgendamentos_();
+    var achado = _acharPorId_(sh, id);
+    if (!achado) throw new Error('Agendamento não encontrado.');
+    estado = estado || {};
+    var rodas = sanitizar_(estado.estadoRodas, 30);
+    var pubs = estado.estoquePubs;
+    if (pubs !== '' && pubs !== null && pubs !== undefined) {
+      var n = Number(pubs);
+      if (!isFinite(n) || n < 0 || n > 9999) throw new Error('Estoque inválido.');
+      pubs = n;
+    } else { pubs = ''; }
+    var display = sanitizar_(estado.estadoDisplay, 30);
+    var notasEst = sanitizar_(estado.notasEstado, 500);
+    var C = COL.AGENDAMENTOS;
+    sh.getRange(achado.row, C.STATUS_1IDX).setValue(STATUS.CONCLUIDO);
+    sh.getRange(achado.row, C.CHECKOUT_1IDX).setValue(_ts_());
+    sh.getRange(achado.row, C.ESTADO_RODAS_1IDX).setValue(rodas);
+    sh.getRange(achado.row, C.ESTOQUE_PUBS_1IDX).setValue(pubs);
+    sh.getRange(achado.row, C.ESTADO_DISPLAY_1IDX).setValue(display);
+    sh.getRange(achado.row, C.NOTAS_ESTADO_1IDX).setValue(notasEst);
+    _invalidar();
+    return { ok: true };
+  });
+}
+
+// Pacote pro admin: tudo numa chamada só.
+function getDadosAdmin() {
+  return {
+    pontos: listarPontos(false),
+    horarios: listarHorarios(false),
+    equipamentos: listarEquipamentos(false),
+    equipamentoLocais: listarEquipamentoLocais(),
+    feriados: listarFeriados(),
+    urlPublico: getScriptUrl() + '?v=publico',
+    versao: getVersaoApp()
+  };
+}
+
+// Agendamentos do mês (yyyy-MM) pra calendário admin.
+function getAgendamentosDoMes(yyyymm) {
+  if (!/^\d{4}-\d{2}$/.test(String(yyyymm || ''))) throw new Error('Mês deve ser yyyy-MM.');
+  var sh = ensureSheetAgendamentos_();
+  return _todasLinhas_(sh).map(_linhaParaAgendamento_)
+    .filter(function(a) { return a.data && a.data.substring(0, 7) === yyyymm; });
+}
+
 // Variante leve pra publicador checar suas escalas (busca por nome).
 function listarMinhasEscalas(publicador, desdeData) {
   publicador = String(publicador || '').toLowerCase();

@@ -5,25 +5,359 @@
   <base target="_top">
   <title>TP-Carrinhos — Admin</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
   <?!= include('CSS') ?>
 </head>
 <body class="bg-light">
   <nav class="navbar navbar-dark bg-primary mb-3">
     <div class="container-fluid">
-      <span class="navbar-brand mb-0 h1">TP-Carrinhos — Admin</span>
-      <small class="text-white-50">v<?= versao ?></small>
-    </div>
-  </nav>
-  <main class="container">
-    <div class="alert alert-info">
-      Admin UI ainda em construção. Sprint 2.
-      <div class="mt-2 small">
-        Link público:
-        <code><?= urlPublico ?></code>
+      <span class="navbar-brand mb-0 h1">
+        <i class="bi bi-cart-fill"></i> TP-Carrinhos
+      </span>
+      <div class="d-flex gap-2 align-items-center">
+        <button class="btn btn-sm btn-outline-light" id="btnLinkPublico" type="button">
+          <i class="bi bi-link-45deg"></i> <span class="d-none d-sm-inline">Link publicador</span>
+        </button>
+        <small class="text-white-50">v<?= versao ?></small>
       </div>
     </div>
+  </nav>
+
+  <main class="container">
+    <ul class="nav nav-tabs mb-3" role="tablist">
+      <li class="nav-item"><button class="nav-link active" data-tab="agendamentos">📅 Agendamentos</button></li>
+      <li class="nav-item"><button class="nav-link"        data-tab="calendario">🗓️ Calendário</button></li>
+      <li class="nav-item"><button class="nav-link"        data-tab="pontos">📍 Pontos</button></li>
+      <li class="nav-item"><button class="nav-link"        data-tab="horarios">⏰ Horários</button></li>
+      <li class="nav-item"><button class="nav-link"        data-tab="equipamentos">🛒 Equipamentos</button></li>
+      <li class="nav-item"><button class="nav-link"        data-tab="feriados">🚫 Feriados</button></li>
+    </ul>
+
+    <section id="tab-agendamentos" class="tab-pane">
+      <div class="d-flex flex-wrap gap-2 align-items-end mb-3">
+        <div>
+          <label class="form-label small mb-1">Data</label>
+          <input type="date" id="agData" class="form-control">
+        </div>
+        <button class="btn btn-outline-secondary" id="agHoje" type="button">Hoje</button>
+        <button class="btn btn-outline-secondary" id="agRecarregar" type="button">
+          <i class="bi bi-arrow-clockwise"></i>
+        </button>
+      </div>
+      <div id="agLista" class="row g-3"></div>
+    </section>
+
+    <section id="tab-calendario" class="tab-pane d-none">
+      <div class="d-flex gap-2 align-items-center mb-3">
+        <button class="btn btn-outline-secondary btn-icon" id="calPrev" aria-label="Mês anterior">
+          <i class="bi bi-chevron-left"></i>
+        </button>
+        <h5 class="mb-0 flex-grow-1 text-center" id="calTitulo"></h5>
+        <button class="btn btn-outline-secondary btn-icon" id="calNext" aria-label="Próximo mês">
+          <i class="bi bi-chevron-right"></i>
+        </button>
+      </div>
+      <div id="calGrid" class="cal-grid"></div>
+      <div class="small text-muted mt-2 d-flex flex-wrap gap-3">
+        <span><span class="cal-dot cal-vazio"></span> sem agendamento</span>
+        <span><span class="cal-dot cal-parcial"></span> parcial</span>
+        <span><span class="cal-dot cal-cheio"></span> lotado</span>
+        <span><span class="cal-dot cal-feriado"></span> feriado</span>
+      </div>
+    </section>
+
+    <section id="tab-pontos" class="tab-pane d-none">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h4 class="mb-0">Pontos de TP</h4>
+        <button class="btn btn-primary" id="btnNovoPonto" type="button">
+          <i class="bi bi-plus-lg"></i> Novo ponto
+        </button>
+      </div>
+      <div id="pontosLista" class="row g-3"></div>
+    </section>
+
+    <section id="tab-horarios" class="tab-pane d-none">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h4 class="mb-0">Horários</h4>
+        <button class="btn btn-primary" id="btnNovoHorario" type="button">
+          <i class="bi bi-plus-lg"></i> Novo horário
+        </button>
+      </div>
+      <div id="horariosLista"></div>
+    </section>
+
+    <section id="tab-equipamentos" class="tab-pane d-none">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h4 class="mb-0">Carrinhos e Displays</h4>
+        <button class="btn btn-primary" id="btnNovoEquipamento" type="button">
+          <i class="bi bi-plus-lg"></i> Novo equipamento
+        </button>
+      </div>
+      <div id="equipamentosLista" class="row g-3"></div>
+    </section>
+
+    <section id="tab-feriados" class="tab-pane d-none">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h4 class="mb-0">Feriados (cancelam TP)</h4>
+        <button class="btn btn-primary" id="btnNovoFeriado" type="button">
+          <i class="bi bi-plus-lg"></i> Novo feriado
+        </button>
+      </div>
+      <div id="feriadosLista"></div>
+    </section>
   </main>
+
+  <!-- ====== Modal Ponto ====== -->
+  <div class="modal fade" id="modalPonto" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Ponto de TP</h5>
+          <button class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+        </div>
+        <div class="modal-body">
+          <form id="formPonto" class="row g-3" onsubmit="return false">
+            <input type="hidden" id="pontoId">
+            <div class="col-12">
+              <label class="form-label">Nome <span class="text-danger">*</span></label>
+              <input type="text" id="pontoNome" class="form-control" maxlength="120" required>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Endereço</label>
+              <input type="text" id="pontoEndereco" class="form-control" maxlength="240" placeholder="Opcional">
+            </div>
+            <div class="col-12">
+              <label class="form-label d-flex justify-content-between">
+                <span>Localização <span class="text-danger">*</span></span>
+                <span class="small text-muted">Clique no mapa pra marcar</span>
+              </label>
+              <div id="mapaPonto" class="mapa-ponto"></div>
+              <div class="d-flex gap-2 mt-2">
+                <input type="number" step="0.00001" id="pontoLat" class="form-control form-control-sm" placeholder="Latitude">
+                <input type="number" step="0.00001" id="pontoLng" class="form-control form-control-sm" placeholder="Longitude">
+              </div>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Notas</label>
+              <textarea id="pontoNotas" class="form-control" rows="2" maxlength="500"></textarea>
+            </div>
+            <div class="col-12 form-check ms-2">
+              <input type="checkbox" id="pontoAtivo" class="form-check-input" checked>
+              <label class="form-check-label" for="pontoAtivo">Ativo</label>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline-danger me-auto d-none" id="pontoExcluir" type="button">
+            <i class="bi bi-trash"></i> Excluir
+          </button>
+          <button class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button class="btn btn-primary" id="pontoSalvar" type="button">Salvar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== Modal Horário ====== -->
+  <div class="modal fade" id="modalHorario" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Horário</h5>
+          <button class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <form id="formHorario" class="row g-3" onsubmit="return false">
+            <input type="hidden" id="horarioId">
+            <div class="col-12">
+              <label class="form-label">Ponto <span class="text-danger">*</span></label>
+              <select id="horarioPontoId" class="form-select" required></select>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Dia da semana <span class="text-danger">*</span></label>
+              <select id="horarioDiaSemana" class="form-select" required>
+                <option value="0">Domingo</option>
+                <option value="1">Segunda</option>
+                <option value="2">Terça</option>
+                <option value="3">Quarta</option>
+                <option value="4">Quinta</option>
+                <option value="5">Sexta</option>
+                <option value="6" selected>Sábado</option>
+              </select>
+            </div>
+            <div class="col-6">
+              <label class="form-label">Início</label>
+              <input type="time" id="horarioInicio" class="form-control" value="08:00" required>
+            </div>
+            <div class="col-6">
+              <label class="form-label">Fim</label>
+              <input type="time" id="horarioFim" class="form-control" value="10:00" required>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Capacidade (publicadores)</label>
+              <input type="number" id="horarioCapacidade" class="form-control" min="1" max="20" value="2" required>
+            </div>
+            <div class="col-12 form-check ms-2">
+              <input type="checkbox" id="horarioAtivo" class="form-check-input" checked>
+              <label class="form-check-label" for="horarioAtivo">Ativo</label>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline-danger me-auto d-none" id="horarioExcluir" type="button">
+            <i class="bi bi-trash"></i> Excluir
+          </button>
+          <button class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button class="btn btn-primary" id="horarioSalvar" type="button">Salvar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== Modal Equipamento ====== -->
+  <div class="modal fade" id="modalEquipamento" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Carrinho / Display</h5>
+          <button class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <form id="formEquipamento" class="row g-3" onsubmit="return false">
+            <input type="hidden" id="equipamentoId">
+            <div class="col-8">
+              <label class="form-label">Nome <span class="text-danger">*</span></label>
+              <input type="text" id="equipamentoNome" class="form-control" maxlength="120" required>
+            </div>
+            <div class="col-4">
+              <label class="form-label">Tipo</label>
+              <select id="equipamentoTipo" class="form-select">
+                <option value="carrinho">Carrinho</option>
+                <option value="display">Display</option>
+              </select>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Local de guarda padrão</label>
+              <input type="text" id="equipamentoLocalPadrao" class="form-control" maxlength="240" placeholder="Ex: Salão do Reino">
+            </div>
+            <div class="col-12">
+              <label class="form-label">Notas</label>
+              <textarea id="equipamentoNotas" class="form-control" rows="2" maxlength="500"></textarea>
+            </div>
+            <div class="col-12 form-check ms-2">
+              <input type="checkbox" id="equipamentoAtivo" class="form-check-input" checked>
+              <label class="form-check-label" for="equipamentoAtivo">Ativo</label>
+            </div>
+            <hr>
+            <div class="col-12">
+              <h6 class="mb-2">Override de local por dia da semana</h6>
+              <p class="small text-muted">Vazio = usa o local padrão. Útil quando o carrinho fica em lugar diferente em alguns dias.</p>
+              <div class="row g-2" id="equipamentoOverrides"></div>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline-danger me-auto d-none" id="equipamentoExcluir" type="button">
+            <i class="bi bi-trash"></i> Excluir
+          </button>
+          <button class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button class="btn btn-primary" id="equipamentoSalvar" type="button">Salvar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== Modal Feriado ====== -->
+  <div class="modal fade" id="modalFeriado" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Feriado</h5>
+          <button class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <form id="formFeriado" class="row g-3" onsubmit="return false">
+            <div class="col-12">
+              <label class="form-label">Data <span class="text-danger">*</span></label>
+              <input type="date" id="feriadoData" class="form-control" required>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Nome <span class="text-danger">*</span></label>
+              <input type="text" id="feriadoNome" class="form-control" maxlength="120" required>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Ponto (vazio = todos)</label>
+              <select id="feriadoPontoId" class="form-select">
+                <option value="">Todos os pontos</option>
+              </select>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button class="btn btn-primary" id="feriadoSalvar" type="button">Salvar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== Modal Check-out ====== -->
+  <div class="modal fade" id="modalCheckout" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Check-out</h5>
+          <button class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <form id="formCheckout" class="row g-3" onsubmit="return false">
+            <input type="hidden" id="checkoutAgId">
+            <div class="col-6">
+              <label class="form-label">Estado das rodas</label>
+              <select id="checkoutRodas" class="form-select">
+                <option value="">-</option>
+                <option value="ok">OK</option>
+                <option value="atencao">Atenção</option>
+                <option value="problema">Problema</option>
+              </select>
+            </div>
+            <div class="col-6">
+              <label class="form-label">Estado do display</label>
+              <select id="checkoutDisplay" class="form-select">
+                <option value="">-</option>
+                <option value="ok">OK</option>
+                <option value="atencao">Atenção</option>
+                <option value="problema">Problema</option>
+              </select>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Estoque de publicações restante</label>
+              <input type="number" id="checkoutEstoque" class="form-control" min="0" max="9999" placeholder="Quantas sobraram">
+            </div>
+            <div class="col-12">
+              <label class="form-label">Notas de estado</label>
+              <textarea id="checkoutNotas" class="form-control" rows="2" maxlength="500"></textarea>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button class="btn btn-primary" id="checkoutSalvar" type="button">Finalizar turno</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <?!= include('JS_ToastPublico') ?>
-  <script defer src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" defer></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
+  <script>
+    var URL_PUBLICO = "<?= urlPublico ?>";
+    var URL_ADMIN   = "<?= urlAdmin ?>";
+  </script>
+  <?!= include('JS_App') ?>
 </body>
 </html>
