@@ -1,16 +1,1 @@
-{
-  "scriptId": "1nh705oOD0b2fs3HMtC0rGkvZrZQiZo0WoLUxG5wT_1TWHDp61duTWtvv",
-  "rootDir": "",
-  "scriptExtensions": [
-    ".js",
-    ".gs"
-  ],
-  "htmlExtensions": [
-    ".html"
-  ],
-  "jsonExtensions": [
-    ".json"
-  ],
-  "filePushOrder": [],
-  "skipSubdirectories": false
-}
+{"scriptId":"1kxXgqwml55NctsrkGpbRbz9GG65Ex9TVm-Jw49bcH1xMQe6LLL6hZI3W","rootDir":"."}
