@@ -227,12 +227,15 @@
     position: absolute; left: 2px; right: 2px;
     border-radius: 6px; padding: 4px 6px;
     color: #fff; font-size: .78rem; line-height: 1.2;
-    overflow: hidden; cursor: pointer;
+    overflow: hidden; cursor: grab;
     border: 1px solid rgba(0, 0, 0, .12);
     box-shadow: 0 1px 2px rgba(0, 0, 0, .08);
     transition: transform var(--t-fast), box-shadow var(--t-fast);
     min-height: 16px;
+    user-select: none;
   }
+  .evento:active { cursor: grabbing; }
+  .evento.concluido, .evento.cancelado { cursor: pointer; }
   .evento:hover { transform: scale(1.01); box-shadow: 0 4px 10px rgba(0, 0, 0, .15); z-index: 3; }
   .evento.concluido { opacity: .65; }
   .evento.cancelado { opacity: .4; text-decoration: line-through; }

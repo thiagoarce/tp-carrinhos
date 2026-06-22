@@ -233,7 +233,7 @@ function excluirPublicadorDefinitivo(id) {
       var arr = _parsePubs_(r[COL.EVENTOS.PUBLICADORES_JSON]);
       return arr.some(function(x) { return x.id === id || _normNome_(x.nome) === _normNome_(nomePub); });
     });
-    if (temEv) throw new Error('Não dá pra excluir: existem eventos com esse publicador. Desative em vez disso.');
+    if (temEv) throw new Error('Não dá pra excluir: existem agendamentos com esse publicador. Desative em vez disso.');
     sh.deleteRow(achado.row);
     _invalidar();
     return { ok: true };
@@ -318,7 +318,7 @@ function excluirPontoDefinitivo(id) {
       return String(r[COL.EVENTOS.PONTO_ID]) === id
           && String(r[COL.EVENTOS.STATUS] || '') !== STATUS.CANCELADO;
     });
-    if (temEv) throw new Error('Esse ponto tem eventos ligados. Cancele-os antes ou desative o ponto.');
+    if (temEv) throw new Error('Esse ponto tem agendamentos ligados. Cancele-os antes ou desative o ponto.');
     sh.deleteRow(achado.row);
     _invalidar();
     return { ok: true };
@@ -415,7 +415,7 @@ function excluirEquipamentoDefinitivo(id) {
       return String(r[COL.EVENTOS.EQUIPAMENTO_ID] || '') === id
           && String(r[COL.EVENTOS.STATUS] || '') !== STATUS.CANCELADO;
     });
-    if (temEv) throw new Error('Esse equipamento tem eventos ativos. Cancele-os primeiro.');
+    if (temEv) throw new Error('Esse equipamento tem agendamentos ativos. Cancele-os primeiro.');
     var shO = ensureSheetEqLocais_();
     var lo = _todasLinhas_(shO);
     for (var i = lo.length - 1; i >= 0; i--) {
@@ -673,7 +673,7 @@ function atualizarEvento(id, payload) {
   return withLock_(function() {
     var sh = ensureSheetEventos_();
     var achado = _acharPorId_(sh, id);
-    if (!achado) throw new Error('Evento não encontrado.');
+    if (!achado) throw new Error('Agendamento não encontrado.');
     var v = achado.valores;
     var C = COL.EVENTOS;
 
@@ -711,11 +711,11 @@ function adicionarPublicadorAoEvento(id, publicadorRef) {
   return withLock_(function() {
     var sh = ensureSheetEventos_();
     var achado = _acharPorId_(sh, id);
-    if (!achado) throw new Error('Evento não encontrado.');
+    if (!achado) throw new Error('Agendamento não encontrado.');
     var pubs = _parsePubs_(achado.valores[COL.EVENTOS.PUBLICADORES_JSON]);
     var novo = _resolvePublicadores_([publicadorRef])[0];
     if (pubs.some(function(p) { return p.id === novo.id; })) {
-      throw new Error(novo.nome + ' já está nesse evento.');
+      throw new Error(novo.nome + ' já está nesse agendamento.');
     }
     pubs.push(novo);
     sh.getRange(achado.row, COL.EVENTOS.PUBLICADORES_JSON_1IDX).setValue(JSON.stringify(pubs));
@@ -728,7 +728,7 @@ function removerPublicadorDoEvento(id, publicadorId) {
   return withLock_(function() {
     var sh = ensureSheetEventos_();
     var achado = _acharPorId_(sh, id);
-    if (!achado) throw new Error('Evento não encontrado.');
+    if (!achado) throw new Error('Agendamento não encontrado.');
     var pubs = _parsePubs_(achado.valores[COL.EVENTOS.PUBLICADORES_JSON])
       .filter(function(p) { return p.id !== String(publicadorId); });
     sh.getRange(achado.row, COL.EVENTOS.PUBLICADORES_JSON_1IDX).setValue(JSON.stringify(pubs));
@@ -741,7 +741,7 @@ function excluirEvento(id, escopo) {
   return withLock_(function() {
     var sh = ensureSheetEventos_();
     var achado = _acharPorId_(sh, id);
-    if (!achado) throw new Error('Evento não encontrado.');
+    if (!achado) throw new Error('Agendamento não encontrado.');
     if (escopo === 'serie') {
       var serieId = String(achado.valores[COL.EVENTOS.SERIE_ID]);
       var linhas = _todasLinhas_(sh);
@@ -760,7 +760,7 @@ function cancelarEvento(id, escopo) {
   return withLock_(function() {
     var sh = ensureSheetEventos_();
     var achado = _acharPorId_(sh, id);
-    if (!achado) throw new Error('Evento não encontrado.');
+    if (!achado) throw new Error('Agendamento não encontrado.');
     if (escopo === 'serie') {
       var serieId = String(achado.valores[COL.EVENTOS.SERIE_ID]);
       var linhas = _todasLinhas_(sh);
@@ -781,7 +781,7 @@ function concluirEvento(id, estado) {
   return withLock_(function() {
     var sh = ensureSheetEventos_();
     var achado = _acharPorId_(sh, id);
-    if (!achado) throw new Error('Evento não encontrado.');
+    if (!achado) throw new Error('Agendamento não encontrado.');
     estado = estado || {};
     var pubs = estado.estoquePubs;
     if (pubs !== '' && pubs !== null && pubs !== undefined) {

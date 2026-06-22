@@ -299,13 +299,10 @@
 
     container.innerHTML = html.join('');
 
-    // Click handlers
-    $$('.evento', container).forEach(function(el) {
-      el.addEventListener('click', function(e) {
-        e.stopPropagation();
-        abrirPainelEvento(el.dataset.ev);
-      });
-    });
+    // Drag (e click) nos cards
+    $$('.evento', container).forEach(function(el) { instalarDragEvento(el, container); });
+
+    // Click no fundo cria agendamento novo
     $$('.ghost-click', container).forEach(function(el) {
       el.addEventListener('click', function(e) {
         var col = el.parentElement;
@@ -321,6 +318,109 @@
           horaFim: minParaHhmm(min + 60)
         });
       });
+    });
+  }
+
+  // ====== Drag & drop dos cards ======
+  function instalarDragEvento(card, container) {
+    var DRAG_THRESH = 5; // px antes de virar drag
+    card.style.touchAction = 'none'; // permite pointer no mobile
+    card.addEventListener('pointerdown', function(e) {
+      if (e.button !== undefined && e.button !== 0) return;
+      var ev = ui.eventos.find(function(x) { return x.id === card.dataset.ev; });
+      if (!ev) return;
+      var podeArrastar = ev.status !== 'cancelado' && ev.status !== 'concluido';
+      var rect = card.getBoundingClientRect();
+      var col = card.parentElement; // .col-dia
+      var origCss = card.style.cssText;
+      var dragging = false;
+      var pointerId = e.pointerId;
+      var startX = e.clientX, startY = e.clientY;
+      var offX = e.clientX - rect.left, offY = e.clientY - rect.top;
+      var origW = rect.width, origH = rect.height;
+      var clone = null, alvoCol = null;
+
+      function onMove(ev2) {
+        if (!podeArrastar) return;
+        var dx = ev2.clientX - startX, dy = ev2.clientY - startY;
+        if (!dragging) {
+          if (Math.abs(dx) + Math.abs(dy) < DRAG_THRESH) return;
+          dragging = true;
+          // cria clone "flutuante" do card
+          clone = card.cloneNode(true);
+          clone.style.cssText =
+            'position:fixed;left:' + (ev2.clientX - offX) + 'px;top:' + (ev2.clientY - offY) + 'px;' +
+            'width:' + origW + 'px;height:' + origH + 'px;' +
+            'pointer-events:none;z-index:10000;opacity:.92;' +
+            'box-shadow:0 12px 28px rgba(0,0,0,.25);' +
+            'background:' + getComputedStyle(card).backgroundColor + ';';
+          document.body.appendChild(clone);
+          card.style.opacity = '0.25';
+        } else {
+          clone.style.left = (ev2.clientX - offX) + 'px';
+          clone.style.top  = (ev2.clientY - offY) + 'px';
+          // realça coluna do dia onde está
+          var hit = document.elementFromPoint(ev2.clientX, ev2.clientY);
+          var newCol = hit && hit.closest && hit.closest('.col-dia');
+          if (newCol !== alvoCol) {
+            if (alvoCol) alvoCol.style.background = '';
+            alvoCol = newCol;
+            if (alvoCol) alvoCol.style.background = 'var(--accent-soft)';
+          }
+        }
+      }
+
+      function onUp(ev2) {
+        card.releasePointerCapture(pointerId);
+        card.removeEventListener('pointermove', onMove);
+        card.removeEventListener('pointerup', onUp);
+        card.removeEventListener('pointercancel', onUp);
+        if (!dragging) {
+          // click puro → abre painel
+          abrirPainelEvento(card.dataset.ev);
+          return;
+        }
+        // limpa visual
+        if (clone && clone.parentNode) clone.parentNode.removeChild(clone);
+        card.style.cssText = origCss;
+        if (alvoCol) alvoCol.style.background = '';
+
+        var alvo = (function() {
+          // pega o ponto onde o cursor está
+          var hit = document.elementFromPoint(ev2.clientX, ev2.clientY);
+          return hit && hit.closest && hit.closest('.col-dia');
+        })();
+        if (!alvo) { atualizarVisaoAtual(); return; }
+
+        var rectA = alvo.getBoundingClientRect();
+        var y = ev2.clientY - rectA.top - offY;
+        if (y < 0) y = 0;
+        var min = HORA_INICIAL * 60 + snap30((y / PX_POR_SLOT) * SLOT_MIN);
+        var dur = minHora(ev.horaFim) - minHora(ev.horaInicio);
+        if (min < HORA_INICIAL * 60) min = HORA_INICIAL * 60;
+        if (min + dur > HORA_FINAL * 60) min = HORA_FINAL * 60 - dur;
+        var novaData = alvo.dataset.data;
+        var novaHi = minParaHhmm(min);
+        var novaHf = minParaHhmm(min + dur);
+        // se não mudou nada, ignora
+        if (novaData === ev.data && novaHi === ev.horaInicio.substring(0,5) && novaHf === ev.horaFim.substring(0,5)) {
+          return;
+        }
+        rpc('atualizarEvento', ev.id, { data: novaData, horaInicio: novaHi, horaFim: novaHf })
+          .then(function() {
+            tst('Agendamento movido pra ' + novaData + ' ' + novaHi, 'success', 2200);
+            atualizarVisaoAtual();
+          })
+          .catch(function(err) {
+            trataErro(err);
+            atualizarVisaoAtual();
+          });
+      }
+
+      card.setPointerCapture(pointerId);
+      card.addEventListener('pointermove', onMove);
+      card.addEventListener('pointerup', onUp);
+      card.addEventListener('pointercancel', onUp);
     });
   }
 
@@ -461,7 +561,7 @@
       (ev && ev.status !== 'concluido' ? '<button class="btn" id="evConcluir">Concluir</button>' : '') +
       '<button class="btn btn-primary" id="evSalvar">' + (ev ? 'Salvar' : 'Criar') + '</button>'
     );
-    abrirPainel(ev ? 'Editar evento' : 'Novo evento', body, foot);
+    abrirPainel(ev ? 'Editar agendamento' : 'Novo agendamento', body, foot);
 
     // Add publicador via select
     $('#evPubAdd').addEventListener('change', function() {
@@ -517,10 +617,10 @@
           escopo = 'serie';
         }
       } else {
-        if (!confirm('Excluir esse evento?')) return;
+        if (!confirm('Excluir esse agendamento?')) return;
       }
       rpc('excluirEvento', ev.id, escopo).then(function() {
-        tst('Evento excluído', 'info');
+        tst('Agendamento excluído', 'info');
         fecharPainel();
         atualizarVisaoAtual();
       }).catch(trataErro);
@@ -542,7 +642,7 @@
     if (ev) {
       // edita só esta ocorrência
       rpc('atualizarEvento', ev.id, payload).then(function() {
-        tst('Evento atualizado', 'success');
+        tst('Agendamento atualizado', 'success');
         fecharPainel();
         atualizarVisaoAtual();
       }).catch(trataErro);
@@ -572,7 +672,7 @@
     );
     var foot = '<button class="btn" id="coVoltar">Voltar</button>' +
                '<button class="btn btn-primary" id="coSalvar">Concluir</button>';
-    abrirPainel('Concluir evento', body, foot);
+    abrirPainel('Concluir agendamento', body, foot);
     $('#coVoltar').addEventListener('click', function() { abrirPainelEvento(ev.id); });
     $('#coSalvar').addEventListener('click', function() {
       var est = {
@@ -582,7 +682,7 @@
         notasEstado: $('#coNotas').value.trim()
       };
       rpc('concluirEvento', ev.id, est).then(function() {
-        tst('Evento concluído', 'success');
+        tst('Agendamento concluído', 'success');
         fecharPainel();
         atualizarVisaoAtual();
       }).catch(trataErro);
@@ -719,7 +819,7 @@
       rpc(fn, payload).then(function() { tst('Publicador salvo', 'success'); fecharPainel(); carregarTudo(); }).catch(trataErro);
     });
     if (p) $('#pubExcluir').addEventListener('click', function() {
-      if (!confirm('EXCLUIR ' + p.nome + '? Bloqueia se há eventos ativos.')) return;
+      if (!confirm('EXCLUIR ' + p.nome + '? Bloqueia se há agendamentos ativos.')) return;
       rpc('excluirPublicadorDefinitivo', p.id).then(function() { tst('Excluído', 'info'); fecharPainel(); carregarTudo(); }).catch(trataErro);
     });
   }
@@ -779,7 +879,7 @@
     $('#pCancelar').addEventListener('click', fecharPainel);
     $('#pSalvar').addEventListener('click', function() { salvarPonto(p && p.id); });
     if (p) $('#pExcluir').addEventListener('click', function() {
-      if (!confirm('EXCLUIR esse ponto? Bloqueia se há eventos ligados.')) return;
+      if (!confirm('EXCLUIR esse ponto? Bloqueia se há agendamentos ligados.')) return;
       rpc('excluirPontoDefinitivo', p.id).then(function() { tst('Excluído', 'info'); fecharPainel(); carregarTudo(); }).catch(trataErro);
     });
   }
@@ -920,7 +1020,7 @@
       }).then(function() { tst('Equipamento salvo', 'success'); fecharPainel(); carregarTudo(); }).catch(trataErro);
     });
     if (e) $('#eExcluir').addEventListener('click', function() {
-      if (!confirm('EXCLUIR esse equipamento? Bloqueia se há eventos ativos.')) return;
+      if (!confirm('EXCLUIR esse equipamento? Bloqueia se há agendamentos ativos.')) return;
       rpc('excluirEquipamentoDefinitivo', e.id).then(function() { tst('Excluído', 'info'); fecharPainel(); carregarTudo(); }).catch(trataErro);
     });
   }
