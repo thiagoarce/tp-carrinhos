@@ -254,24 +254,24 @@
 
   function desenharAgenda(container, eventos, corPorEq) {
     var hoje = ymdHoje();
+    var totalSlots = (HORA_FINAL - HORA_INICIAL) * (60 / SLOT_MIN);
     var html = [];
 
-    // Header
     html.push('<div class="agenda">');
+    // Header com dias
     html.push('<div class="agenda-head">');
     html.push('<div class="col-h"></div>');
     for (var i = 0; i < 7; i++) {
       var d = adicionarDias(ui.semanaInicio, i);
       var dYmd = ymd(d);
-      var cls = 'col-d' + (dYmd === hoje ? ' hoje' : '');
-      html.push('<div class="' + cls + '">' +
+      html.push('<div class="col-d' + (dYmd === hoje ? ' hoje' : '') + '">' +
         '<div class="dia-nome">' + DIAS_CURTOS[d.getDay()] + '</div>' +
         '<div class="dia-num">' + fmtBR(d) + '</div>' +
       '</div>');
     }
-    html.push('</div>'); // /head
+    html.push('</div>');
 
-    // Body: coluna horas + 7 colunas de dia
+    // Body: coluna horas + 7 colunas de dia (cada uma com N células de 30min)
     html.push('<div class="agenda-body">');
     html.push('<div class="col-horas">');
     for (var h = HORA_INICIAL; h < HORA_FINAL; h++) {
@@ -279,23 +279,25 @@
     }
     html.push('</div>');
 
-    // index eventos por dia
     var evsPorDia = {};
     eventos.forEach(function(ev) {
-      if (!evsPorDia[ev.data]) evsPorDia[ev.data] = [];
-      evsPorDia[ev.data].push(ev);
+      (evsPorDia[ev.data] = evsPorDia[ev.data] || []).push(ev);
     });
-
-    var totalSlots = (HORA_FINAL - HORA_INICIAL) * 2;
-    var alturaTotal = totalSlots * PX_POR_SLOT;
 
     for (var j = 0; j < 7; j++) {
       var dia = adicionarDias(ui.semanaInicio, j);
       var diaYmd = ymd(dia);
       html.push('<div class="col-dia' + (diaYmd === hoje ? ' hoje' : '') +
-        '" data-data="' + esc(diaYmd) + '" style="height:' + alturaTotal + 'px">');
+        '" data-data="' + esc(diaYmd) + '">');
 
-      // Eventos posicionados
+      // Células-base (grade da planilha) — sempre 32 por coluna
+      for (var s = 0; s < totalSlots; s++) {
+        var mDia = HORA_INICIAL * 60 + s * SLOT_MIN;
+        var clsCel = 'cel' + ((s % 2 === 0) ? ' cel-hora' : '');
+        html.push('<div class="' + clsCel + '" data-m="' + mDia + '"></div>');
+      }
+
+      // Cards posicionados absolute por cima das células
       var ehs = evsPorDia[diaYmd] || [];
       var posicionados = posicionarEventos(ehs);
       posicionados.forEach(function(p) {
@@ -306,7 +308,7 @@
         var top = (topMin / SLOT_MIN) * PX_POR_SLOT;
         var height = Math.max(16, (durMin / SLOT_MIN) * PX_POR_SLOT - 2);
         var eq = equipamentoById(ev.equipamentoId);
-        var cor = (corPorEq && eq) ? eq.cor : (eq ? eq.cor : '#2563eb');
+        var cor = (eq && eq.cor) ? eq.cor : '#2563eb';
         var widthPct = 100 / p.totalCols;
         var leftPct = p.col * widthPct;
         var ponto = ev.pontoId ? (pontoById(ev.pontoId) || {}).nome : ev.pontoAvulso;
@@ -330,28 +332,27 @@
       html.push('</div>');
     }
 
-    html.push('</div></div>'); // /body /agenda
-
+    html.push('</div></div>');
     container.innerHTML = html.join('');
     instalarInteracoesAgenda(container);
   }
 
-  // ============ Interações Google Calendar–like ============
-  // - Click+arrasta em espaço vazio: cria com duração desenhada (snap 15min)
-  // - Click+arrasta num card: move (mantém duração)
-  // - Click+arrasta na alça inferior do card: redimensiona duração
-  // - Click curto num card: abre painel pra editar
+  // ============ Interações: planilha de blocos ============
+  // - Click numa célula vazia: seleciona ela (vira 1 bloco = SLOT_MIN min)
+  // - Arrasta sobre células adjacentes: estende seleção (vê blocos pintando)
+  // - Solta: abre painel com horário derivado da seleção
+  // - Click no card: abre pra editar
+  // - Arrasta card: move pra outro slot/dia (snap exato no bloco)
+  // - Arrasta alça inferior: redimensiona em múltiplos de bloco
   function instalarInteracoesAgenda(container) {
     var body = container.querySelector('.agenda-body');
     if (!body) return;
-    // Suprime menu de contexto/seleção do iOS na agenda
     body.addEventListener('contextmenu', function(e) { e.preventDefault(); });
     body.addEventListener('selectstart', function(e) { e.preventDefault(); });
-    // Bloqueia gesto nativo de "touch hold = select" no iOS
     body.addEventListener('touchstart', function(e) {
-      var col = e.target.closest && e.target.closest('.col-dia');
-      if (col) e.preventDefault();
+      if (e.target.closest && e.target.closest('.col-dia')) e.preventDefault();
     }, { passive: false });
+
     body.addEventListener('pointerdown', function(e) {
       if (e.button !== undefined && e.button !== 0) return;
       var col = e.target.closest && e.target.closest('.col-dia');
@@ -361,198 +362,209 @@
 
       var card  = e.target.closest('.evento');
       var resz  = e.target.dataset && e.target.dataset.resize === '1';
-      var modo  = card ? (resz ? 'resize' : 'mover') : 'criar';
+      var cel   = e.target.closest('.cel');
+
       if (card) {
-        var evo = ui.eventos.find(function(x) { return x.id === card.dataset.ev; });
-        if (!evo) return;
-        if (evo.status === 'cancelado' || evo.status === 'concluido') return;
+        var ev = ui.eventos.find(function(x) { return x.id === card.dataset.ev; });
+        if (!ev) return;
+        if (ev.status === 'cancelado' || ev.status === 'concluido') {
+          // cards "só leitura" só recebem click
+          opSomenteClick(e, card);
+          return;
+        }
+        if (resz) opResize(e, card, ev, col);
+        else opMover(e, card, ev, col);
+      } else if (cel) {
+        opCriarSelecao(e, cel, col);
       }
-      iniciarPointerOp(e, modo, col, card);
     });
   }
 
-  function iniciarPointerOp(e, modo, colInicial, card) {
-    var pointerId = e.pointerId;
+  // Listener de pointerup só pra detectar click curto e abrir painel
+  function opSomenteClick(eDown, card) {
+    function onUp(ev2) {
+      desligar();
+      var dx = Math.abs(ev2.clientX - eDown.clientX);
+      var dy = Math.abs(ev2.clientY - eDown.clientY);
+      if (dx + dy < 8) abrirPainelEvento(card.dataset.ev);
+    }
+    var desligar = listenersWin(function() {}, onUp);
+  }
+
+  function listenersWin(onMove, onUp) {
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    return function desligar() {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
+  }
+
+  // === CRIAR via seleção de blocos ===
+  function opCriarSelecao(e, celInicial, col) {
+    var minIni = Number(celInicial.dataset.m);
     var startX = e.clientX, startY = e.clientY;
-    var DRAG_THRESH = 4;
-    var moved = false;
+    var DRAG_THRESH = 4, moved = false;
+    var selecionadas = [celInicial];
+    celInicial.classList.add('sel');
 
-    var colRect = colInicial.getBoundingClientRect();
-    var yIni = e.clientY - colRect.top;
-    var ev = card ? ui.eventos.find(function(x) { return x.id === card.dataset.ev; }) : null;
-    var durOriginal = ev ? (minHora(ev.horaFim) - minHora(ev.horaInicio)) : DUR_MIN_PADRAO;
-    var cardRectOrig = card ? card.getBoundingClientRect() : null;
-    var offYDentroDoCard = card ? (e.clientY - cardRectOrig.top) : 0;
-
-    // Ghost (preview) — pra "criar" e "mover" e "resize"
-    var ghost = document.createElement('div');
-    ghost.className = 'evento ghost';
-    var corGhost = card ? getComputedStyle(card).backgroundColor : 'var(--accent)';
-    ghost.style.background = corGhost;
-    ghost.style.pointerEvents = 'none';
-    ghost.style.zIndex = '20';
-
-    // Pra "mover": o ghost vai pra position:fixed pra cruzar colunas
-    if (modo === 'mover') {
-      ghost.style.position = 'fixed';
-      ghost.style.width = cardRectOrig.width + 'px';
-      ghost.style.height = cardRectOrig.height + 'px';
-      ghost.style.opacity = '.55';
-      ghost.innerHTML = card.innerHTML;
-      document.body.appendChild(ghost);
-      card.style.opacity = '0.3';
+    function pintar(celAtual) {
+      selecionadas.forEach(function(s) { s.classList.remove('sel'); });
+      var mA = minIni, mB = Number(celAtual.dataset.m);
+      var mi = Math.min(mA, mB), mf = Math.max(mA, mB);
+      selecionadas = Array.prototype.filter.call(
+        col.querySelectorAll('.cel'),
+        function(c) { var m = Number(c.dataset.m); return m >= mi && m <= mf; }
+      );
+      selecionadas.forEach(function(s) { s.classList.add('sel'); });
     }
-
-    var colAtual = colInicial;       // pra criar/resize, mantém. Pra mover, atualiza.
-    function colorirAlvo(novo) {
-      if (novo === colAtual && colAtual.classList.contains('alvo-drag')) return;
-      if (colAtual) colAtual.classList.remove('alvo-drag');
-      colAtual = novo;
-      if (colAtual) colAtual.classList.add('alvo-drag');
-    }
-
-    function clamp(min, lo, hi) { return Math.max(lo, Math.min(hi, min)); }
 
     function onMove(ev2) {
       var dx = ev2.clientX - startX, dy = ev2.clientY - startY;
       if (!moved && Math.abs(dx) + Math.abs(dy) < DRAG_THRESH) return;
       moved = true;
-
-      if (modo === 'criar') {
-        // ghost relativo à coluna inicial
-        if (!ghost.parentElement) {
-          ghost.style.position = 'absolute';
-          ghost.style.left = '2px';
-          ghost.style.right = '2px';
-          colInicial.appendChild(ghost);
-        }
-        var yAgora = ev2.clientY - colInicial.getBoundingClientRect().top;
-        var minA = snapMin(yParaMin(yIni));
-        var minB = snapMin(yParaMin(yAgora));
-        var mi = Math.min(minA, minB);
-        var mf = Math.max(minA, minB);
-        if (mf - mi < SNAP_MIN) mf = mi + SNAP_MIN;
-        mi = clamp(mi, HORA_INICIAL * 60, HORA_FINAL * 60 - SNAP_MIN);
-        mf = clamp(mf, mi + SNAP_MIN, HORA_FINAL * 60);
-        ghost._payload = { hi: minParaHhmm(mi), hf: minParaHhmm(mf), data: colInicial.dataset.data };
-        ghost.style.top    = minParaY(mi) + 'px';
-        ghost.style.height = (minParaY(mf) - minParaY(mi)) + 'px';
-        ghost.innerHTML =
-          '<div class="ev-titulo">' + esc(minParaHhmm(mi)) + ' – ' + esc(minParaHhmm(mf)) + '</div>' +
-          '<div class="ev-meta">' + (mf - mi) + ' min</div>';
-      }
-      else if (modo === 'mover') {
-        // ghost segue cursor (fixed)
-        ghost.style.left = (ev2.clientX - (cardRectOrig.width / 2)) + 'px';
-        ghost.style.top  = (ev2.clientY - offYDentroDoCard) + 'px';
-        var hit = document.elementFromPoint(ev2.clientX, ev2.clientY);
-        var novaCol = hit && hit.closest && hit.closest('.col-dia');
-        if (novaCol) colorirAlvo(novaCol);
-      }
-      else if (modo === 'resize') {
-        if (!ghost.parentElement) {
-          ghost.style.position = 'absolute';
-          ghost.style.left = '2px';
-          ghost.style.right = '2px';
-          ghost.style.opacity = '.6';
-          colInicial.appendChild(ghost);
-        }
-        var hiMin = minHora(ev.horaInicio);
-        var yAgora = ev2.clientY - colInicial.getBoundingClientRect().top;
-        var mf = snapMin(yParaMin(yAgora));
-        mf = clamp(mf, hiMin + SNAP_MIN, HORA_FINAL * 60);
-        ghost._payload = { hi: ev.horaInicio.substring(0,5), hf: minParaHhmm(mf), data: ev.data };
-        ghost.style.top    = minParaY(hiMin) + 'px';
-        ghost.style.height = (minParaY(mf) - minParaY(hiMin)) + 'px';
-        ghost.innerHTML =
-          '<div class="ev-titulo">' + esc(ev.horaInicio.substring(0,5)) + ' – ' + esc(minParaHhmm(mf)) + '</div>' +
-          '<div class="ev-meta">' + (mf - hiMin) + ' min</div>';
-      }
+      var hit = document.elementFromPoint(ev2.clientX, ev2.clientY);
+      var c2 = hit && hit.closest && hit.closest('.cel');
+      if (c2 && c2.parentElement === col) pintar(c2);
     }
 
-    function limpar() {
-      if (ghost && ghost.parentNode) ghost.parentNode.removeChild(ghost);
-      if (colAtual) colAtual.classList.remove('alvo-drag');
-      if (colInicial) colInicial.classList.remove('alvo-drag');
-      if (card) card.style.opacity = '';
+    function onUp() {
+      desligar();
+      var mins = selecionadas.map(function(s) { return Number(s.dataset.m); });
+      selecionadas.forEach(function(s) { s.classList.remove('sel'); });
+      if (!mins.length) return;
+      var mi = Math.min.apply(null, mins);
+      var mf = Math.max.apply(null, mins) + SLOT_MIN; // último bloco "estende" SLOT_MIN
+      abrirPainelEvento(null, {
+        equipamentoId: ui.view === 'planner' ? ui.equipamentoId : '',
+        data: col.dataset.data,
+        horaInicio: minParaHhmm(mi),
+        horaFim: minParaHhmm(mf)
+      });
     }
+    var desligar = listenersWin(onMove, onUp);
+  }
 
-    function desligar() {
-      try { body.releasePointerCapture(pointerId); } catch (er) {}
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
+  // === MOVER card ===
+  function opMover(e, card, ev, colOrig) {
+    var startX = e.clientX, startY = e.clientY;
+    var DRAG_THRESH = 4, moved = false;
+    var cardRect = card.getBoundingClientRect();
+    var offY = e.clientY - cardRect.top;
+    var durMin = minHora(ev.horaFim) - minHora(ev.horaInicio);
+    var ghost = null, alvoCol = null;
+
+    function onMove(ev2) {
+      var dx = ev2.clientX - startX, dy = ev2.clientY - startY;
+      if (!moved && Math.abs(dx) + Math.abs(dy) < DRAG_THRESH) return;
+      if (!moved) {
+        moved = true;
+        ghost = document.createElement('div');
+        ghost.className = 'evento ghost';
+        ghost.style.position = 'fixed';
+        ghost.style.width = cardRect.width + 'px';
+        ghost.style.height = cardRect.height + 'px';
+        ghost.style.background = getComputedStyle(card).backgroundColor;
+        ghost.style.pointerEvents = 'none';
+        ghost.style.zIndex = '1000';
+        ghost.innerHTML = card.innerHTML;
+        document.body.appendChild(ghost);
+        card.style.opacity = '0.3';
+      }
+      ghost.style.left = (ev2.clientX - cardRect.width / 2) + 'px';
+      ghost.style.top  = (ev2.clientY - offY) + 'px';
+      var hit = document.elementFromPoint(ev2.clientX, ev2.clientY);
+      var col = hit && hit.closest && hit.closest('.col-dia');
+      if (col !== alvoCol) {
+        if (alvoCol) alvoCol.classList.remove('alvo-drag');
+        alvoCol = col;
+        if (alvoCol) alvoCol.classList.add('alvo-drag');
+      }
     }
 
     function onUp(ev2) {
       desligar();
-      if (!moved) {
-        limpar();
-        // click curto
-        if (modo === 'mover' || modo === 'resize') {
-          abrirPainelEvento(card.dataset.ev);
-        } else {
-          // click curto em espaço vazio → cria com 1h padrão
-          var min = snapMin(yParaMin(yIni));
-          min = clamp(min, HORA_INICIAL * 60, HORA_FINAL * 60 - DUR_MIN_PADRAO);
-          abrirPainelEvento(null, {
-            equipamentoId: ui.view === 'planner' ? ui.equipamentoId : '',
-            data: colInicial.dataset.data,
-            horaInicio: minParaHhmm(min),
-            horaFim: minParaHhmm(min + DUR_MIN_PADRAO)
-          });
-        }
-        return;
-      }
+      if (!moved) { abrirPainelEvento(card.dataset.ev); return; }
+      if (ghost && ghost.parentNode) ghost.parentNode.removeChild(ghost);
+      card.style.opacity = '';
+      if (alvoCol) alvoCol.classList.remove('alvo-drag');
 
-      // === aplicar drag ===
-      if (modo === 'criar') {
-        var p = ghost._payload || {};
-        limpar();
-        abrirPainelEvento(null, {
-          equipamentoId: ui.view === 'planner' ? ui.equipamentoId : '',
-          data: p.data, horaInicio: p.hi, horaFim: p.hf
-        });
+      var hit = document.elementFromPoint(ev2.clientX, ev2.clientY);
+      var col = hit && hit.closest && hit.closest('.col-dia');
+      if (!col) { atualizarVisaoAtual(); return; }
+
+      var rect = col.getBoundingClientRect();
+      var y = ev2.clientY - rect.top - offY;
+      if (y < 0) y = 0;
+      var slot = Math.round(y / PX_POR_SLOT);
+      var hiMin = HORA_INICIAL * 60 + slot * SLOT_MIN;
+      if (hiMin + durMin > HORA_FINAL * 60) hiMin = HORA_FINAL * 60 - durMin;
+      if (hiMin < HORA_INICIAL * 60) hiMin = HORA_INICIAL * 60;
+      var hfMin = hiMin + durMin;
+      var novaData = col.dataset.data;
+      var novaHi = minParaHhmm(hiMin);
+      var novaHf = minParaHhmm(hfMin);
+      if (novaData === ev.data && novaHi === ev.horaInicio.substring(0,5)) return;
+      rpc('atualizarEvento', ev.id, { data: novaData, horaInicio: novaHi, horaFim: novaHf })
+        .then(function() { tst('Movido pra ' + novaData + ' ' + novaHi, 'success', 1500); recarregarAgenda(); })
+        .catch(function(err) { trataErro(err); recarregarAgenda(); });
+    }
+    var desligar = listenersWin(onMove, onUp);
+  }
+
+  // === RESIZE (alça inferior) ===
+  function opResize(e, card, ev, col) {
+    var startX = e.clientX, startY = e.clientY;
+    var DRAG_THRESH = 4, moved = false;
+    var hiMin = minHora(ev.horaInicio);
+    var ghost = null, novoHfStr = null;
+
+    function onMove(ev2) {
+      var dx = ev2.clientX - startX, dy = ev2.clientY - startY;
+      if (!moved && Math.abs(dx) + Math.abs(dy) < DRAG_THRESH) return;
+      if (!moved) {
+        moved = true;
+        ghost = document.createElement('div');
+        ghost.className = 'evento ghost';
+        ghost.style.position = 'absolute';
+        ghost.style.left = '2px';
+        ghost.style.right = '2px';
+        ghost.style.background = getComputedStyle(card).backgroundColor;
+        ghost.style.pointerEvents = 'none';
+        ghost.style.opacity = '.7';
+        ghost.style.zIndex = '5';
+        col.appendChild(ghost);
+        card.style.opacity = '0.3';
       }
-      else if (modo === 'mover') {
-        // detecta coluna alvo
-        var hit = document.elementFromPoint(ev2.clientX, ev2.clientY);
-        var alvo = hit && hit.closest && hit.closest('.col-dia');
-        if (!alvo) { limpar(); return; }
-        var rectA = alvo.getBoundingClientRect();
-        var yRel = ev2.clientY - rectA.top - offYDentroDoCard;
-        var hiMin = snapMin(yParaMin(yRel));
-        var dur = durOriginal;
-        hiMin = clamp(hiMin, HORA_INICIAL * 60, HORA_FINAL * 60 - dur);
-        var hfMin = hiMin + dur;
-        var novaData = alvo.dataset.data;
-        var novaHi = minParaHhmm(hiMin);
-        var novaHf = minParaHhmm(hfMin);
-        limpar();
-        if (novaData === ev.data && novaHi === ev.horaInicio.substring(0,5) && novaHf === ev.horaFim.substring(0,5)) {
-          atualizarVisaoAtual();
-          return;
-        }
-        rpc('atualizarEvento', ev.id, { data: novaData, horaInicio: novaHi, horaFim: novaHf })
-          .then(function() { tst('Movido pra ' + novaData + ' ' + novaHi, 'success', 1800); recarregarAgenda(); })
-          .catch(function(err) { trataErro(err); recarregarAgenda(); });
-      }
-      else if (modo === 'resize') {
-        var p2 = ghost._payload || {};
-        limpar();
-        if (p2.hf === ev.horaFim.substring(0,5)) { atualizarVisaoAtual(); return; }
-        rpc('atualizarEvento', ev.id, { horaFim: p2.hf })
-          .then(function() { tst('Duração ajustada', 'success', 1600); recarregarAgenda(); })
-          .catch(function(err) { trataErro(err); recarregarAgenda(); });
-      }
+      var rect = col.getBoundingClientRect();
+      var y = ev2.clientY - rect.top;
+      var slot = Math.round(y / PX_POR_SLOT);
+      var hfMin = HORA_INICIAL * 60 + slot * SLOT_MIN;
+      if (hfMin <= hiMin) hfMin = hiMin + SLOT_MIN;
+      if (hfMin > HORA_FINAL * 60) hfMin = HORA_FINAL * 60;
+      var top    = (hiMin - HORA_INICIAL * 60) / SLOT_MIN * PX_POR_SLOT;
+      var height = (hfMin - hiMin) / SLOT_MIN * PX_POR_SLOT - 2;
+      ghost.style.top = top + 'px';
+      ghost.style.height = height + 'px';
+      novoHfStr = minParaHhmm(hfMin);
+      ghost.innerHTML = '<div class="ev-titulo">' + esc(minParaHhmm(hiMin)) + ' – ' + esc(novoHfStr) + '</div>';
     }
 
-    try { body.setPointerCapture(pointerId); } catch (er) {}
-    // Listeners no window cobrem o caso de o pointer sair da agenda no mobile
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
+    function onUp() {
+      desligar();
+      if (!moved) { abrirPainelEvento(card.dataset.ev); return; }
+      if (ghost && ghost.parentNode) ghost.parentNode.removeChild(ghost);
+      card.style.opacity = '';
+      if (!novoHfStr || novoHfStr === ev.horaFim.substring(0,5)) { atualizarVisaoAtual(); return; }
+      rpc('atualizarEvento', ev.id, { horaFim: novoHfStr })
+        .then(function() { tst('Duração ajustada', 'success', 1500); recarregarAgenda(); })
+        .catch(function(err) { trataErro(err); recarregarAgenda(); });
+    }
+    var desligar = listenersWin(onMove, onUp);
   }
+
 
   // Atribui colunas pra evitar overlap visual.
   function posicionarEventos(eventos) {
@@ -758,14 +770,19 @@
   }
 
   function salvarEvento(ev, original) {
+    function vOu(inp, fallback) {
+      var v = inp ? inp.value : '';
+      return (v && String(v).length) ? v : (fallback || '');
+    }
+    function _h(s) { return s ? String(s).substring(0, 5) : ''; }
     var payload = {
       id: ev ? ev.id : null,
-      equipamentoId: $('#evEq').value,
+      equipamentoId: vOu($('#evEq'), original && original.equipamentoId),
       pontoId: $('#evPonto').value,
       pontoAvulso: $('#evPontoAv').value.trim(),
-      data: $('#evData').value,
-      horaInicio: $('#evIni').value,
-      horaFim: $('#evFim').value,
+      data: vOu($('#evData'), original && original.data),
+      horaInicio: vOu($('#evIni'), _h(original && original.horaInicio)),
+      horaFim: vOu($('#evFim'), _h(original && original.horaFim)),
       publicadores: (original && original.publicadores) || [],
       notas: $('#evNotas').value.trim()
     };

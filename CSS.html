@@ -223,14 +223,22 @@
   .col-dia {
     border-right: 1px solid var(--border);
     position: relative;
-    background-image:
-      linear-gradient(to bottom, transparent calc(var(--slot-h) * 2 - 1px), var(--border) calc(var(--slot-h) * 2 - 1px), var(--border) calc(var(--slot-h) * 2), transparent calc(var(--slot-h) * 2));
-    background-size: 100% calc(var(--slot-h) * 2);
-    touch-action: none; /* permite arrasto via pointer events no mobile */
+    touch-action: none;
+    display: flex; flex-direction: column;
   }
   .col-dia:last-child { border-right: 0; }
-  .col-dia.hoje { background-color: rgba(37, 99, 235, .04); }
+  .col-dia.hoje { background-color: rgba(37, 99, 235, .035); }
   .col-dia.alvo-drag { background-color: rgba(37, 99, 235, .14) !important; outline: 2px dashed var(--accent); outline-offset: -2px; }
+  /* Células-base da grade (planilha) */
+  .cel {
+    height: var(--slot-h);
+    border-bottom: 1px solid #eef0f4;
+    cursor: pointer;
+    box-sizing: border-box;
+  }
+  .cel.cel-hora { border-bottom-color: var(--border); }
+  .cel:hover { background-color: rgba(37, 99, 235, .05); }
+  .cel.sel { background-color: rgba(37, 99, 235, .22); }
 
   .evento {
     position: absolute; left: 2px; right: 2px;
