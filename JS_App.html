@@ -607,7 +607,22 @@
   function abrirPainelEvento(id, preset) {
     var ev = id ? ui.eventos.find(function(e) { return e.id === id; }) : null;
     preset = preset || {};
-    var p = ev || {
+    // 'p' é a ÚNICA fonte de verdade. Inputs sincronizam aqui.
+    // Pra edit (ev existe), clonamos pra não mexer no objeto do estado.
+    var p = ev ? {
+      id: ev.id,
+      equipamentoId: ev.equipamentoId,
+      pontoId: ev.pontoId || '',
+      pontoAvulso: ev.pontoAvulso || '',
+      data: ev.data,
+      horaInicio: ev.horaInicio,
+      horaFim: ev.horaFim,
+      publicadores: (ev.publicadores || []).slice(),
+      notas: ev.notas || '',
+      recorrenciaTipo: 'none',
+      recorrenciaFim: '',
+      status: ev.status
+    } : {
       equipamentoId: preset.equipamentoId || '',
       pontoId: '', pontoAvulso: '',
       data: preset.data || ymdHoje(),
@@ -705,6 +720,30 @@
     );
     abrirPainel(ev ? 'Editar agendamento' : 'Novo agendamento', body, foot);
 
+    // Sincroniza inputs → p (p é a fonte de verdade do salvar)
+    function bindSync(sel, prop, transform) {
+      var el = $(sel);
+      if (!el) return;
+      var fn = function() {
+        var v = el.value;
+        if (transform) v = transform(v);
+        p[prop] = v;
+      };
+      el.addEventListener('input', fn);
+      el.addEventListener('change', fn);
+    }
+    bindSync('#evEq',      'equipamentoId');
+    bindSync('#evPonto',   'pontoId');
+    bindSync('#evPontoAv', 'pontoAvulso', function(v) { return (v || '').trim(); });
+    bindSync('#evData',    'data');
+    bindSync('#evIni',     'horaInicio');
+    bindSync('#evFim',     'horaFim');
+    bindSync('#evNotas',   'notas', function(v) { return (v || '').trim(); });
+    if (!ev) {
+      bindSync('#evRec',    'recorrenciaTipo');
+      bindSync('#evRecFim', 'recorrenciaFim');
+    }
+
     // Add publicador via select
     $('#evPubAdd').addEventListener('change', function() {
       var idPub = $('#evPubAdd').value;
@@ -769,37 +808,36 @@
     });
   }
 
-  function salvarEvento(ev, original) {
-    function vOu(inp, fallback) {
-      var v = inp ? inp.value : '';
-      return (v && String(v).length) ? v : (fallback || '');
-    }
-    function _h(s) { return s ? String(s).substring(0, 5) : ''; }
+  function salvarEvento(ev, p) {
+    function h5(s) { return s ? String(s).substring(0, 5) : ''; }
     var payload = {
       id: ev ? ev.id : null,
-      equipamentoId: vOu($('#evEq'), original && original.equipamentoId),
-      pontoId: $('#evPonto').value,
-      pontoAvulso: $('#evPontoAv').value.trim(),
-      data: vOu($('#evData'), original && original.data),
-      horaInicio: vOu($('#evIni'), _h(original && original.horaInicio)),
-      horaFim: vOu($('#evFim'), _h(original && original.horaFim)),
-      publicadores: (original && original.publicadores) || [],
-      notas: $('#evNotas').value.trim()
+      equipamentoId: p.equipamentoId || '',
+      pontoId: p.pontoId || '',
+      pontoAvulso: (p.pontoAvulso || '').trim(),
+      data: p.data || '',
+      horaInicio: h5(p.horaInicio),
+      horaFim: h5(p.horaFim),
+      publicadores: p.publicadores || [],
+      notas: (p.notas || '').trim()
     };
+    if (!payload.equipamentoId) return tst('Selecione um equipamento', 'warn');
+    if (!payload.data || !payload.horaInicio || !payload.horaFim) {
+      return tst('Preencha data e horários', 'warn');
+    }
     if (ev) {
-      // edita só esta ocorrência
       rpc('atualizarEvento', ev.id, payload).then(function() {
         tst('Agendamento atualizado', 'success');
         fecharPainel();
-        atualizarVisaoAtual();
+        recarregarAgenda();
       }).catch(trataErro);
     } else {
-      payload.recorrenciaTipo = $('#evRec').value;
-      payload.recorrenciaFim = $('#evRecFim').value || '';
+      payload.recorrenciaTipo = p.recorrenciaTipo || 'none';
+      payload.recorrenciaFim = p.recorrenciaFim || '';
       rpc('criarEvento', payload).then(function(r) {
         tst('Criado: ' + r.ocorrencias + ' ocorrência(s)', 'success');
         fecharPainel();
-        atualizarVisaoAtual();
+        recarregarAgenda();
       }).catch(trataErro);
     }
   }
